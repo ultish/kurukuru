@@ -1,0 +1,11 @@
+{
+  "project": "REPLACE_ME",
+  "_help": "Edit 'gates' to match THIS repo. Each gate runs in the repo root; every required gate must exit 0 before a slice can be marked verified. Delete gates you don't have; add integration/e2e/coverage gates you do.",
+  "gates": {
+    "typecheck": { "cmd": "npm run -s typecheck", "required": true, "timeout": 600 },
+    "lint":      { "cmd": "npm run -s lint",      "required": true, "timeout": 600 },
+    "unit":      { "cmd": "npm test -- --run",    "required": true, "timeout": 1200 },
+    "build":     { "cmd": "npm run -s build",     "required": true, "timeout": 1200 }
+  },
+  "session_budget_hint": "A slice should fit one agent session: ~1 vertical behavior, < ~10 files touched, tests included. If it won't fit in your head, split it."
+}

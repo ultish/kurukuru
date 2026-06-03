@@ -1,0 +1,25 @@
+# Frozen definition-of-done for {{ID}}. The verifier reads this and checks every
+# acceptance criterion against CONCRETE EVIDENCE. Set frozen: true at status ready.
+slice: "{{ID}}"
+title: "{{TITLE}}"
+frozen: false
+
+done_definition: >
+  REPLACE: one or two sentences stating what is unambiguously true when this
+  slice is done. No hedging.
+
+acceptance_criteria:
+  - id: AC-1
+    statement: "REPLACE: a concrete, observable fact (e.g. POST /things returns 201 with the created id)."
+    kind: automated            # automated | manual | observed
+    evidence_required: "REPLACE: the exact proof the verifier must obtain (e.g. test test_create_thing_201 passes; or a driven-app screenshot showing X)."
+  # - id: AC-2
+  #   statement: "..."
+  #   kind: observed
+  #   evidence_required: "..."
+
+# Deterministic gates that must be green (must exist as keys in .keel/config.json).
+gates: [typecheck, lint, unit, build]
+
+out_of_scope:
+  - "REPLACE: things explicitly NOT in this slice, so the verifier doesn't fail it for them."
