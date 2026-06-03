@@ -1,7 +1,7 @@
-# `.keel/` workspace
+# `.kuru/` workspace
 
-This directory is the **state** of a Keel-managed delivery effort for this repo.
-The `keel` plugin is the tool; this directory is the per-project memory.
+This directory is the **state** of a Kurukuru-managed delivery effort for this repo.
+The `kuru` plugin is the tool; this directory is the per-project memory.
 
 ## The pipeline
 ```
@@ -20,11 +20,11 @@ charter -> prd -> slice -> build -> verify -> review -> done
 | `slices/<id>/contract.yml` | Frozen definition-of-done + acceptance criteria. | narrative (frozen) |
 | `slices/<id>/build-log.md` | Builder's running notes. | narrative |
 | `slices/<id>/verification.md` | Verifier's evidence-backed verdict. | narrative |
-| `slices/<id>/gate-results.json` | Output of `keel gate`. | **machine** |
+| `slices/<id>/gate-results.json` | Output of `kuru gate`. | **machine** |
 
 **Rule:** machine truth lives in `ledger.json` + `gate-results.json` and is only
-written by `keel.py`. Everything else is narrative written by agents. A slice
+written by `kuru.py`. Everything else is narrative written by agents. A slice
 cannot become `verified` unless a recorded gate run passed — this is enforced in
 code, not by trust.
 
-Do not hand-edit `ledger.json` or `gate-results.json`; use `keel` subcommands.
+Do not hand-edit `ledger.json` or `gate-results.json`; use `kuru` subcommands.

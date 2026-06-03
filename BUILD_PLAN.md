@@ -1,17 +1,17 @@
-# Build Plan — `keel`: an enterprise delivery harness for coding agents
+# Build Plan — `kuru`: an enterprise delivery harness for coding agents
 
 > **For the implementing model:** This is a complete, self-contained spec. Build it
 > slice by slice in the order given (§7). Each slice has explicit acceptance
 > criteria — do not advance until they pass. Where exact file contents are given
 > in fenced blocks, reproduce them faithfully; where a *spec/outline* is given,
 > write the file to satisfy every listed requirement. One file already exists and
-> is **load-bearing reference**: `scripts/keel.py` — use it as-is.
+> is **load-bearing reference**: `scripts/kuru.py` — use it as-is.
 
 ---
 
 ## 1. What we are building and why
 
-`keel` is a Claude Code **plugin** that turns a coding agent into a disciplined
+`kuru` is a Claude Code **plugin** that turns a coding agent into a disciplined
 delivery pipeline for **production enterprise software** — not vibe-coding. It
 encodes the hard-won patterns from three harness-design articles:
 
@@ -32,33 +32,33 @@ encodes the hard-won patterns from three harness-design articles:
 **The core thesis of keel:** facts that gate progress (does a slice exist, what
 state is it in, did the tests/typecheck/lint/build pass) must live in
 machine-checked files, never in an agent's narration. Agents reason and write
-prose; a tiny deterministic engine (`keel.py`) owns the truth.
+prose; a tiny deterministic engine (`kuru.py`) owns the truth.
 
 ### The pipeline
 
 ```
-  /keel:charter  ── shared understanding, captured as a charter
+  /kuru:charter  ── shared understanding, captured as a charter
         │
-  /keel:prd      ── charter → PRD (problem, scope, NFRs, acceptance shape)
+  /kuru:prd      ── charter → PRD (problem, scope, NFRs, acceptance shape)
         │
-  /keel:slice    ── PRD → vertical slices: small enough for ONE session's
+  /kuru:slice    ── PRD → vertical slices: small enough for ONE session's
         │            context, complete enough to build without guessing.
         │            Each slice gets a FROZEN contract (definition of done +
         │            acceptance criteria + which deterministic gates apply).
         │
-  /keel:build    ── builder subagent implements ONE slice; updates build-log;
+  /kuru:build    ── builder subagent implements ONE slice; updates build-log;
         │            runs gates; sets status `built`. Cannot self-certify.
         │
-  /keel:verify   ── SEPARATE verifier subagent. Re-runs gates, exercises the
+  /kuru:verify   ── SEPARATE verifier subagent. Re-runs gates, exercises the
         │            running app, and for EVERY acceptance criterion cites
         │            concrete evidence. Verdict: verified | rejected.
         │
-  /keel:review   ── code review (delegates to /code-review) → reviewed
+  /kuru:review   ── code review (delegates to /code-review) → reviewed
         │
        done
 ```
 
-### The slice state machine (owned by `keel.py`)
+### The slice state machine (owned by `kuru.py`)
 
 ```
 draft → ready → in_progress → built → verifying → verified → reviewed → done
@@ -67,7 +67,7 @@ draft → ready → in_progress → built → verifying → verified → reviewe
 any → blocked → (unblock to anywhere)        done → in_progress (reopen)
 ```
 
-Hard rules enforced in code (already implemented in `keel.py`):
+Hard rules enforced in code (already implemented in `kuru.py`):
 - Illegal transitions are rejected.
 - A slice **cannot** enter `verified` unless a recorded gate run exists **and**
   passed (`keel gate <id>` must have been run green).
@@ -85,7 +85,7 @@ harness/
 ├── BUILD_PLAN.md                     # this file (leave as-is)
 ├── .claude-plugin/
 │   └── plugin.json                   # §3.1
-├── commands/                         # user-facing slash commands (/keel:*)
+├── commands/                         # user-facing slash commands (/kuru:*)
 │   ├── charter.md                    # §3.2
 │   ├── prd.md
 │   ├── slice.md
@@ -96,17 +96,17 @@ harness/
 │   ├── next.md
 │   └── bearings.md
 ├── agents/                           # the separated roles (subagents)
-│   ├── keel-planner.md               # §3.3
-│   ├── keel-builder.md
-│   └── keel-verifier.md
+│   ├── kuru-planner.md               # §3.3
+│   ├── kuru-builder.md
+│   └── kuru-verifier.md
 ├── skills/                           # the methodology (model-invokable)
-│   ├── keel-method/SKILL.md          # §3.4 — the spine; everything refers here
+│   ├── kuru-method/SKILL.md          # §3.4 — the spine; everything refers here
 │   ├── writing-prds/SKILL.md
 │   ├── slicing-work/SKILL.md
 │   ├── building-a-slice/SKILL.md
 │   └── verifying-a-slice/SKILL.md
 ├── scripts/
-│   └── keel.py                       # ✅ ALREADY WRITTEN — reference engine
+│   └── kuru.py                       # ✅ ALREADY WRITTEN — reference engine
 └── templates/                        # artifact templates copied into target repos
     ├── config.json                   # §5.1
     ├── charter.md                    # §5.2
@@ -118,13 +118,13 @@ harness/
     └── verification.md               # §5.8
 ```
 
-The plugin operates on a **`.keel/` workspace** that `keel.py init` scaffolds
+The plugin operates on a **`.kuru/` workspace** that `kuru.py init` scaffolds
 inside the *target* repository (the enterprise app being built). Plugin files
-above are the tool; `.keel/` is the per-project state. Never commit `.keel/`
+above are the tool; `.kuru/` is the per-project state. Never commit `.kuru/`
 state into this plugin repo.
 
 ```
-<target-repo>/.keel/
+<target-repo>/.kuru/
 ├── config.json        # gate commands for THIS project (typecheck/lint/test/build)
 ├── ledger.json        # machine truth: all slices + statuses + history
 ├── charter.md         # shared understanding
@@ -148,16 +148,16 @@ Exact contents:
 
 ```json
 {
-  "name": "keel",
+  "name": "kuru",
   "version": "0.1.0",
   "description": "Enterprise delivery harness: charter → PRD → vertical slices → build → independent verification → review, with deterministic gates and file-based handoffs for long-running coding agents.",
-  "author": { "name": "keel" },
+  "author": { "name": "kuru" },
   "keywords": ["harness", "agents", "prd", "verification", "enterprise", "workflow"]
 }
 ```
 
 Claude Code auto-discovers `commands/`, `agents/`, and `skills/` by convention —
-no need to list them. Commands become `/keel:<file-stem>`.
+no need to list them. Commands become `/kuru:<file-stem>`.
 
 ### 3.2 Slash commands (`commands/*.md`)
 
@@ -167,9 +167,9 @@ Conventions for the implementing model:
 - Frontmatter keys: `description` (one line), `argument-hint` (optional).
 - The body is the instruction the main agent executes when the user runs it.
 - Commands may shell out with lines beginning `!` and embed file contents with
-  `@path`. Use `${CLAUDE_PLUGIN_ROOT}` to reach `scripts/keel.py`.
+  `@path`. Use `${CLAUDE_PLUGIN_ROOT}` to reach `scripts/kuru.py`.
 - Invoke the deterministic engine as
-  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/keel.py" <subcommand>`.
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" <subcommand>`.
 - Commands are thin: they orchestrate and point at the matching **skill** for
   methodology. Keep heavy guidance in skills, not commands.
 
@@ -177,15 +177,15 @@ Per-command spec:
 
 | File | `description` | Body must do |
 |---|---|---|
-| `charter.md` | "Run a discovery session and write the shared-understanding charter." | Invoke the `keel-method` + (a new) charter guidance; interview the user for problem, stakeholders, success metrics, constraints, non-goals; write/update `.keel/charter.md`. If no `.keel/` exists, instruct running `keel init` first (offer to run it). |
-| `prd.md` | "Turn the charter into a PRD for a feature/epic." | Use the `writing-prds` skill. Read `.keel/charter.md`. Dispatch the **keel-planner** subagent to draft `.keel/prd/<feature>.md`. Argument = feature name. |
+| `charter.md` | "Run a discovery session and write the shared-understanding charter." | Invoke the `kuru-method` + (a new) charter guidance; interview the user for problem, stakeholders, success metrics, constraints, non-goals; write/update `.kuru/charter.md`. If no `.kuru/` exists, instruct running `keel init` first (offer to run it). |
+| `prd.md` | "Turn the charter into a PRD for a feature/epic." | Use the `writing-prds` skill. Read `.kuru/charter.md`. Dispatch the **kuru-planner** subagent to draft `.kuru/prd/<feature>.md`. Argument = feature name. |
 | `slice.md` | "Decompose a PRD into vertical slices with frozen contracts." | Use the `slicing-work` skill. Read the named PRD. For each slice: `keel new-slice "<title>"`, then fill `slice.md` + `contract.yml`, then `keel set-status <id> ready`. Argument = PRD/feature name. |
-| `build.md` | "Build the next ready slice (or a named one) via the builder subagent." | Use `building-a-slice`. Resolve target via `keel next` or `$1`. Dispatch **keel-builder** subagent on exactly one slice. After it returns, show `keel show <id>`. |
-| `verify.md` | "Independently verify a built slice against its frozen contract." | Use `verifying-a-slice`. **Must** dispatch the **keel-verifier** subagent (a different agent than built it). Argument = slice id (default: first `built`). |
+| `build.md` | "Build the next ready slice (or a named one) via the builder subagent." | Use `building-a-slice`. Resolve target via `keel next` or `$1`. Dispatch **kuru-builder** subagent on exactly one slice. After it returns, show `keel show <id>`. |
+| `verify.md` | "Independently verify a built slice against its frozen contract." | Use `verifying-a-slice`. **Must** dispatch the **kuru-verifier** subagent (a different agent than built it). Argument = slice id (default: first `built`). |
 | `review.md` | "Code-review a verified slice and mark it reviewed." | Run the existing `/code-review` (high effort) on the slice's diff; summarize findings; if clean, `keel set-status <id> reviewed --by reviewer`. |
 | `status.md` | "Show the delivery dashboard." | Run `keel ls` and `keel next`; summarize what's blocked / awaiting verification; surface any failing gate-results.json. |
-| `next.md` | "Print and start the next actionable slice." | Run `keel next`; based on its status, suggest the matching `/keel:*` command. |
-| `bearings.md` | "Get your bearings at the start of a session (context reset recovery)." | The session-startup ritual: read `.keel/progress.md`, `keel ls`, recent git log, run `keel doctor`; summarize where things stand and the single next action. This is the antidote to context-reset amnesia. |
+| `next.md` | "Print and start the next actionable slice." | Run `keel next`; based on its status, suggest the matching `/kuru:*` command. |
+| `bearings.md` | "Get your bearings at the start of a session (context reset recovery)." | The session-startup ritual: read `.kuru/progress.md`, `keel ls`, recent git log, run `kuru doctor`; summarize where things stand and the single next action. This is the antidote to context-reset amnesia. |
 
 ### 3.3 Subagents (`agents/*.md`)
 
@@ -193,7 +193,7 @@ Each is a markdown file with frontmatter (`name`, `description`, optional
 `tools`, optional `model`) and a system prompt body. These encode the
 **separation of concerns**. Specs:
 
-**`keel-planner.md`** — expands a charter into an ambitious-but-grounded PRD, and
+**`kuru-planner.md`** — expands a charter into an ambitious-but-grounded PRD, and
 PRDs into candidate slice boundaries.
 - `description`: "Plans enterprise features: charter → PRD and PRD → vertical slice boundaries."
 - `tools`: `Read, Grep, Glob, Bash, Write, Edit, WebFetch`
@@ -205,13 +205,13 @@ PRDs into candidate slice boundaries.
   - Never invent requirements the charter doesn't support; flag gaps as open
     questions rather than guessing.
 
-**`keel-builder.md`** — the generator. Implements exactly one slice.
-- `description`: "Implements a single Keel slice end to end, then runs gates and updates the build log. Does NOT self-certify."
+**`kuru-builder.md`** — the generator. Implements exactly one slice.
+- `description`: "Implements a single Kurukuru slice end to end, then runs gates and updates the build log. Does NOT self-certify."
 - `tools`: `Read, Grep, Glob, Bash, Write, Edit`
 - System prompt requirements:
   1. Read the slice's `slice.md` and `contract.yml` **and treat the contract as
      frozen** — if it's wrong, stop and surface it, do not silently change scope.
-  2. Read `.keel/progress.md` and relevant code to match existing patterns.
+  2. Read `.kuru/progress.md` and relevant code to match existing patterns.
   3. Implement a **vertical** change: every layer needed for the acceptance
      criteria, plus tests, plus observability hooks the NFRs require.
   4. Append to `build-log.md`: decisions, files touched, how each acceptance
@@ -222,14 +222,14 @@ PRDs into candidate slice boundaries.
      ready for an independent verifier. Resist "context anxiety" — do not declare
      done early to save tokens; if you can't finish, set `blocked` with a note.
 
-**`keel-verifier.md`** — the evaluator/gatekeeper. The crucial independent check.
+**`kuru-verifier.md`** — the evaluator/gatekeeper. The crucial independent check.
 - `description`: "Independently gatekeeps a built slice against its frozen contract using concrete evidence. Adversarial, not collaborative."
 - `tools`: `Read, Grep, Glob, Bash` (note: **no Write/Edit of source** — it
   judges, it does not fix; it only writes `verification.md` via Bash/heredoc or
   is given Write but instructed to touch only `verification.md`).
 - System prompt requirements:
   1. You did not build this. Assume nothing the builder claims; verify it.
-  2. Re-run `keel gate <id>` yourself; record the result. Green gates are
+  2. Re-run `kuru gate <id>` yourself; record the result. Green gates are
      **necessary but not sufficient**.
   3. For **every** acceptance criterion in `contract.yml`, obtain **concrete
      evidence**: a passing test name + output, an actual HTTP response, a log
@@ -254,14 +254,14 @@ Each skill is `skills/<dir>/SKILL.md` with frontmatter `name` + `description`
 the methodology. **This is the highest-value content in the plugin** — write it
 carefully; the bullets below are requirements, not filler.
 
-**`keel-method/SKILL.md`** — the spine.
-- `description`: "Use when working in a Keel workspace (.keel/) or running any /keel:* command. Explains the pipeline, the slice state machine, the artifacts, and the rules."
+**`kuru-method/SKILL.md`** — the spine.
+- `description`: "Use when working in a Kurukuru workspace (.kuru/) or running any /kuru:* command. Explains the pipeline, the slice state machine, the artifacts, and the rules."
 - Body must cover: the pipeline diagram (§1); the state machine and the hard
   rules (§1); the artifact map (§2); the principle that **machine truth lives in
-  `keel.py`/JSON, narrative lives in markdown**; the **context-reset** discipline
+  `kuru.py`/JSON, narrative lives in markdown**; the **context-reset** discipline
   (each phase is a clean handoff — read artifacts, don't rely on prior chat); the
   **separation rule** (builder ≠ verifier, always); and a quick-reference of
-  every `keel.py` subcommand.
+  every `kuru.py` subcommand.
 
 **`writing-prds/SKILL.md`**
 - `description`: "Use when turning a charter into a PRD for an enterprise feature."
@@ -300,7 +300,7 @@ carefully; the bullets below are requirements, not filler.
     one-line acceptance criteria.
 
 **`building-a-slice/SKILL.md`**
-- `description`: "Use when implementing a single Keel slice."
+- `description`: "Use when implementing a single Kurukuru slice."
 - Body mirrors the builder subagent's procedure (§3.3) but as reusable
   methodology: read frozen contract → match existing patterns → vertical change +
   tests + observability → update build-log with how each AC is met → `keel gate`
@@ -318,14 +318,14 @@ carefully; the bullets below are requirements, not filler.
 
 ---
 
-## 4. The engine (`scripts/keel.py`) — already written
+## 4. The engine (`scripts/kuru.py`) — already written
 
 Do **not** rewrite it. It is the single source of machine truth. Subcommands
-(call as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/keel.py" <cmd>`):
+(call as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" <cmd>`):
 
 | Command | Effect |
 |---|---|
-| `init [--force]` | Scaffold `.keel/` in cwd from `templates/`. |
+| `init [--force]` | Scaffold `.kuru/` in cwd from `templates/`. |
 | `new-slice "<title>" [--epic E]` | Create `SL-NNNN` + its artifact files; ledger entry `draft`. |
 | `ls [--status S]` | Table of slices. |
 | `show <id>` | Slice JSON + artifact presence. |
@@ -343,7 +343,7 @@ error. That is why §5 templates are part of "done."
 ## 5. Template files (`templates/*`)
 
 These are copied verbatim (with `{{PLACEHOLDER}}` substitution done by
-`keel.py`'s `render()`) into target repos. Placeholders available: `{{ID}}`,
+`kuru.py`'s `render()`) into target repos. Placeholders available: `{{ID}}`,
 `{{TITLE}}`, `{{DATE}}`, `{{EPIC}}`, `{{PROJECT}}`. Write each file to satisfy the
 spec; exact JSON is given where structure matters to the engine.
 
@@ -376,10 +376,10 @@ The cross-session narrative handoff. Headings: `# Progress — {{PROJECT}}`,
 **Current state** (one paragraph), **Last session did**, **Next action** (single
 most important thing), **Known issues / landmines**, **How to run / verify**
 (point at `init.sh` or the run skill). Include a note: "Update this at the END of
-every session — it is what the next session reads first (`/keel:bearings`)."
+every session — it is what the next session reads first (`/kuru:bearings`)."
 
 ### 5.4 `templates/workspace-readme.md`
-Short `# .keel/ workspace` explainer: what each file/dir is, the pipeline, and
+Short `# .kuru/ workspace` explainer: what each file/dir is, the pipeline, and
 "machine truth = ledger.json + gate-results.json; everything else is narrative."
 
 ### 5.5 `templates/slice.md`
@@ -434,8 +434,8 @@ Spec — sections required:
 3. **Install** — how to add as a Claude Code plugin (local plugin dir / add to a
    marketplace); requires `python3`.
 4. **Quickstart** — in a target repo: `keel init` → edit `config.json` gates →
-   `/keel:charter` → `/keel:prd <feature>` → `/keel:slice <feature>` →
-   `/keel:build` → `/keel:verify` → `/keel:review`.
+   `/kuru:charter` → `/kuru:prd <feature>` → `/kuru:slice <feature>` →
+   `/kuru:build` → `/kuru:verify` → `/kuru:review`.
 5. **The state machine + hard rules** (§1).
 6. **Files** — the two trees from §2.
 7. **Design principles** — context resets, work/judgment separation, deterministic
@@ -450,10 +450,10 @@ independently verifiable. Do them in order; don't start one until the prior one'
 acceptance criteria pass.
 
 **SL-1 — Engine + templates boot (walking skeleton).**
-Files: `.claude-plugin/plugin.json`, all of `templates/*` (§5). `scripts/keel.py`
+Files: `.claude-plugin/plugin.json`, all of `templates/*` (§5). `scripts/kuru.py`
 already exists.
 Acceptance:
-- `python3 scripts/keel.py init` in an empty temp dir creates `.keel/` with
+- `python3 scripts/kuru.py init` in an empty temp dir creates `.kuru/` with
   `config.json`, `ledger.json`, `charter.md`, `progress.md`, `README.md` — no
   errors (proves every template `init` needs exists and renders).
 - `keel doctor` reports healthy.
@@ -476,8 +476,8 @@ Document these four checks in the README's design section as the guarantees.
 **SL-3 — Skills (the methodology).**
 Files: all five `skills/*/SKILL.md` (§3.4). Acceptance:
 - Each has valid frontmatter (`name`, `description` starting with "Use when").
-- `keel-method` contains the pipeline, state machine, hard rules, artifact map,
-  and the `keel.py` subcommand reference.
+- `kuru-method` contains the pipeline, state machine, hard rules, artifact map,
+  and the `kuru.py` subcommand reference.
 - `slicing-work` contains the small-enough/complete-enough tension, the
   vertical-not-horizontal rule, the frozen-contract rule, and a worked example.
 - `verifying-a-slice` contains "evidence is something you observed, not restated"
@@ -486,12 +486,12 @@ Files: all five `skills/*/SKILL.md` (§3.4). Acceptance:
 **SL-4 — Commands.**
 Files: all nine `commands/*.md` (§3.2). Acceptance:
 - Each has `description` frontmatter and a body that calls the right
-  `keel.py`/skill/subagent per the §3.2 table.
-- `build.md` dispatches **keel-builder**; `verify.md` dispatches **keel-verifier**
+  `kuru.py`/skill/subagent per the §3.2 table.
+- `build.md` dispatches **kuru-builder**; `verify.md` dispatches **kuru-verifier**
   (a different agent); `bearings.md` performs the startup ritual.
 
 **SL-5 — Subagents.**
-Files: `agents/keel-planner.md`, `keel-builder.md`, `keel-verifier.md` (§3.3).
+Files: `agents/kuru-planner.md`, `kuru-builder.md`, `kuru-verifier.md` (§3.3).
 Acceptance:
 - Builder prompt forbids self-certifying `verified` and editing the contract.
 - Verifier prompt is adversarial, re-runs gates, requires per-AC evidence, and
@@ -510,11 +510,11 @@ Files: `README.md` (§6.1). Acceptance:
 
 ## 8. Conventions for the implementing model
 
-- **Match the engine.** The templates and statuses must agree with `keel.py`
+- **Match the engine.** The templates and statuses must agree with `kuru.py`
   (statuses list, template filenames in `read_template()` calls:
   `config.json`, `charter.md`, `progress.md`, `workspace-readme.md`, `slice.md`,
   `contract.yml`, `build-log.md`, `verification.md`). If a template filename
-  doesn't match what `keel.py` reads, `init`/`new-slice` will crash — that's your
+  doesn't match what `kuru.py` reads, `init`/`new-slice` will crash — that's your
   fastest correctness signal.
 - **Frontmatter must be valid YAML** in every command/agent/skill file.
 - **Keep commands thin, skills deep.** Don't duplicate methodology into commands.

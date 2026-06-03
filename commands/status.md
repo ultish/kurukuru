@@ -2,12 +2,12 @@
 description: Show the Keel delivery dashboard.
 ---
 
-Use the `keel-method` skill for context.
+Use the `kuru-method` skill for context.
 
 Run and present:
-- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/keel.py" ls`
-- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/keel.py" next`
-- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/keel.py" doctor`
+- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" ls`
+- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" next`
+- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor`
 
 Then give the user a short read of the board:
 - What is awaiting verification (`built`) or rejected and needs a builder.

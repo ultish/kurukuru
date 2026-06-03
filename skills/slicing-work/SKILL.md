@@ -54,7 +54,7 @@ satisfy **two opposing constraints at once**.
 
 ## Freeze the contract
 When a slice is ready to build, set `frozen: true` in `contract.yml` and
-`keel set-status <id> ready`. From that moment the definition-of-done and
+`kuru set-status <id> ready`. From that moment the definition-of-done and
 acceptance criteria are **locked**. If you discover the scope was wrong:
 - re-`draft` the slice and re-cut it, or
 - create a new slice for the extra scope.
@@ -84,4 +84,4 @@ Cut into vertical, session-sized slices:
    writes an `audit_log` row with actor, action, target.
 
 Each is vertical, fits a session, and has facts you can check. Create each with
-`keel new-slice "<title>"`, fill `slice.md` + `contract.yml`, then mark `ready`.
+`kuru new-slice "<title>"`, fill `slice.md` + `contract.yml`, then mark `ready`.

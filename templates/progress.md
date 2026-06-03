@@ -2,7 +2,7 @@
 
 _Last updated {{DATE}}. This is the cross-session handoff. **Update it at the END
 of every session.** It is the first thing the next session reads
-(`/keel:bearings`). Treat it as the note you leave for a colleague who has none
+(`/kuru:bearings`). Treat it as the note you leave for a colleague who has none
 of your context._
 
 ## Current state

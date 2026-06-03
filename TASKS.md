@@ -7,7 +7,7 @@ validation** — exactly the work suited to a cheaper model.
 
 ## What is already DONE (do not rewrite)
 
-- `scripts/keel.py` — deterministic state/gate engine. Compiles; CLI verified.
+- `scripts/kuru.py` — deterministic state/gate engine. Compiles; CLI verified.
 - `.claude-plugin/plugin.json`, all `templates/*`.
 - All 5 skills, all 3 agents, all 9 commands. Frontmatter validated.
 - `README.md`, `BUILD_PLAN.md`.
@@ -22,10 +22,10 @@ validation** — exactly the work suited to a cheaper model.
 ### T1 — Install & discovery smoke test  (verification, ~15 min)
 Goal: confirm Claude Code actually loads the plugin.
 - Add this directory as a local Claude Code plugin.
-- Confirm `/keel:charter`, `/keel:build`, `/keel:verify`, `/keel:status`, etc.
-  appear as commands, and that `keel-builder` / `keel-verifier` / `keel-planner`
+- Confirm `/kuru:charter`, `/kuru:build`, `/kuru:verify`, `/kuru:status`, etc.
+  appear as commands, and that `kuru-builder` / `kuru-verifier` / `kuru-planner`
   show up as agents.
-- Acceptance: every `/keel:*` command is listed; no load errors in the plugin
+- Acceptance: every `/kuru:*` command is listed; no load errors in the plugin
   panel.
 - If anything fails to load, the cause is almost always frontmatter or the
   manifest — check against the official Claude Code plugin docs (don't guess the
@@ -43,9 +43,9 @@ Goal: reproduce the three proven guarantees as a regression check.
 ### T3 — Real dry-run on a throwaway repo  (verification, end-to-end)
 Goal: drive the whole pipeline through Claude Code on a tiny real app.
 - In a small Node/TS (or your stack) sample repo: `keel init`, edit
-  `.keel/config.json` gates to that repo's real commands.
-- Run `/keel:charter` → `/keel:prd` → `/keel:slice` for ONE trivial feature
-  (e.g. a health-check endpoint), then `/keel:build` and `/keel:verify`.
+  `.kuru/config.json` gates to that repo's real commands.
+- Run `/kuru:charter` → `/kuru:prd` → `/kuru:slice` for ONE trivial feature
+  (e.g. a health-check endpoint), then `/kuru:build` and `/kuru:verify`.
 - Acceptance: a slice goes `ready → built → verified` with a real
   `gate-results.json` and a `verification.md` that cites concrete evidence; the
   verifier was a different agent than the builder.
@@ -56,7 +56,7 @@ Goal: drive the whole pipeline through Claude Code on a tiny real app.
 Goal: make `keel init` useful beyond Node.
 - Add `templates/config.<stack>.json` presets (e.g. `python`, `go`, `node`) with
   the right gate commands (pytest/ruff/mypy; go test/vet/build; etc.).
-- Wire an optional `keel init --stack <name>` flag in `keel.py` (small change:
+- Wire an optional `keel init --stack <name>` flag in `kuru.py` (small change:
   pick which config template to copy; default stays the current `config.json`).
 - Acceptance: `keel init --stack python` writes a config whose gates are pytest /
   ruff / mypy; existing `keel init` is unchanged.
@@ -64,8 +64,8 @@ Goal: make `keel init` useful beyond Node.
 ### T5 — `init.sh` generation for target repos  (optional, nice-to-have)
 The long-running-agents article recommends an `init.sh` that starts the env in
 one command. Add a `templates/init.sh` and have `keel init` drop a stub into
-`.keel/` for the user to fill, and reference it from `progress.md`'s "How to run".
-- Acceptance: `.keel/init.sh` exists after init and is referenced by progress.md.
+`.kuru/` for the user to fill, and reference it from `progress.md`'s "How to run".
+- Acceptance: `.kuru/init.sh` exists after init and is referenced by progress.md.
 
 ### T6 — Docs polish  (low priority)
 - Add a short `CONTRIBUTING`/usage note if you create a marketplace entry.
@@ -73,7 +73,7 @@ one command. Add a `templates/init.sh` and have `keel init` drop a stub into
 
 ## Guardrails for the follow-up model
 - **Do not change the slice state machine, the hard-rule enforcement, or the
-  template filenames** in `keel.py` — templates are read by exact name; a mismatch
+  template filenames** in `kuru.py` — templates are read by exact name; a mismatch
   crashes `init`/`new-slice` (that's your fastest failure signal).
 - Keep it **stdlib-only**; no new dependencies.
 - Verify each task against its acceptance criteria before moving on — this plugin

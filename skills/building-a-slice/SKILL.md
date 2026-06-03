@@ -1,6 +1,6 @@
 ---
 name: building-a-slice
-description: Use when implementing a single Keel slice (you are the builder). Covers reading the frozen contract, matching existing patterns, making a vertical change with tests and observability, updating the build log, running gates, and the rule that you never self-certify verified.
+description: Use when implementing a single Kurukuru slice (you are the builder). Covers reading the frozen contract, matching existing patterns, making a vertical change with tests and observability, updating the build log, running gates, and the rule that you never self-certify verified.
 ---
 
 # Building a slice
@@ -15,7 +15,7 @@ verifier. You build; you do not judge your own work.
    The contract is **locked** — do not change scope to match what's convenient. If
    the contract is genuinely wrong or impossible, **stop**, set the slice
    `blocked` with a note, and escalate to re-slicing. Do not quietly redefine done.
-2. **Get oriented.** Read `.keel/progress.md` and the code/patterns the slice
+2. **Get oriented.** Read `.kuru/progress.md` and the code/patterns the slice
    names. Match the codebase's existing conventions (naming, error handling,
    test style) — you are extending an enterprise codebase, not starting fresh.
 3. **Make a vertical change.** Implement every layer the acceptance criteria need —
@@ -27,10 +27,10 @@ verifier. You build; you do not judge your own work.
 4. **Keep the build log current.** Append to `build-log.md`: decisions and
    tradeoffs, files touched, and for **each AC** how it's satisfied and where the
    proof lives (test name, endpoint). This is what the verifier reads first.
-5. **Run the gates yourself.** `keel gate <id>`. If red, fix and re-run until
+5. **Run the gates yourself.** `kuru gate <id>`. If red, fix and re-run until
    green. Green gates are the floor, not the ceiling.
 6. **Hand off.** When gates are green and every AC is genuinely met:
-   `keel set-status <id> built --by builder`. Tell the orchestrator it's ready for
+   `kuru set-status <id> built --by builder`. Tell the orchestrator it's ready for
    an **independent** verifier. **You may not set `verified`** — the engine will
    refuse it, and so should you.
 

@@ -7,7 +7,7 @@ _Verifier: <agent/name> · {{DATE}}_
 > claim.
 
 ## Gate run
-<!-- Paste the `keel gate {{ID}}` summary line and date. Green gates are necessary,
+<!-- Paste the `kuru gate {{ID}}` summary line and date. Green gates are necessary,
 not sufficient. -->
 
 ## Per-criterion findings

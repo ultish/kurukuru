@@ -23,7 +23,7 @@ verification is adversarial. That separation is the point.
 1. **Read the contract, not the build log first.** Open `contract.yml` and
    `slice.md`. Know the acceptance criteria before you read what the builder says
    it did — so its narrative doesn't anchor you.
-2. **Re-run the gates yourself.** `keel gate <id>`. Record the result. If red,
+2. **Re-run the gates yourself.** `kuru gate <id>`. Record the result. If red,
    the verdict is already `rejected`.
 3. **Get concrete evidence for EVERY acceptance criterion.** Use the strongest
    evidence available for its `kind`:
@@ -47,8 +47,8 @@ verification is adversarial. That separation is the point.
    bugs, and the verdict.
 
 ## Verdict
-- **All criteria PASS and gates green** → `keel set-status <id> verified --by verifier`.
-- **Anything fails** → `keel set-status <id> rejected --by verifier` with a note
+- **All criteria PASS and gates green** → `kuru set-status <id> verified --by verifier`.
+- **Anything fails** → `kuru set-status <id> rejected --by verifier` with a note
   listing exactly what failed and why, specific enough that the builder can fix it
   without re-reading the whole report.
 

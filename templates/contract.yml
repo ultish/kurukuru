@@ -18,7 +18,7 @@ acceptance_criteria:
   #   kind: observed
   #   evidence_required: "..."
 
-# Deterministic gates that must be green (must exist as keys in .keel/config.json).
+# Deterministic gates that must be green (must exist as keys in .kuru/config.json).
 gates: [typecheck, lint, unit, build]
 
 out_of_scope:

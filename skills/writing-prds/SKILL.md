@@ -5,13 +5,13 @@ description: Use when turning a charter into a PRD for an enterprise feature or 
 
 # Writing a PRD
 
-A Keel PRD turns the shared understanding in `.keel/charter.md` into a concrete
+A Kurukuru PRD turns the shared understanding in `.kuru/charter.md` into a concrete
 specification of **what** to build and **why** — never **how**. It is the input
 to slicing. Write it for production: a feature that "works on the happy path" is
 not done.
 
 ## Start from the charter, never a blank page
-Read `.keel/charter.md` first. The PRD must trace back to the charter's problem,
+Read `.kuru/charter.md` first. The PRD must trace back to the charter's problem,
 users, and success metrics. If the charter doesn't support a requirement, it
 doesn't belong here yet — raise it as an open question, don't invent scope.
 
@@ -56,4 +56,4 @@ doesn't belong here yet — raise it as an open question, don't invent scope.
 - Surface unknowns as **Open questions** with an owner. A PRD full of confident
   guesses is worse than one honest about what's undecided.
 
-Write the PRD to `.keel/prd/<feature>.md`.
+Write the PRD to `.kuru/prd/<feature>.md`.
