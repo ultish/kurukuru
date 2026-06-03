@@ -42,7 +42,7 @@ Goal: reproduce the three proven guarantees as a regression check.
 
 ### T3 — Real dry-run on a throwaway repo  (verification, end-to-end)
 Goal: drive the whole pipeline through Claude Code on a tiny real app.
-- In a small Node/TS (or your stack) sample repo: `keel init`, edit
+- In a small Node/TS (or your stack) sample repo: `kuru init`, edit
   `.kuru/config.json` gates to that repo's real commands.
 - Run `/kuru:charter` → `/kuru:prd` → `/kuru:slice` for ONE trivial feature
   (e.g. a health-check endpoint), then `/kuru:build` and `/kuru:verify`.
@@ -53,17 +53,17 @@ Goal: drive the whole pipeline through Claude Code on a tiny real app.
   file under "Findings".
 
 ### T4 — Config presets for common stacks  (low-judgment authoring)
-Goal: make `keel init` useful beyond Node.
+Goal: make `kuru init` useful beyond Node.
 - Add `templates/config.<stack>.json` presets (e.g. `python`, `go`, `node`) with
   the right gate commands (pytest/ruff/mypy; go test/vet/build; etc.).
-- Wire an optional `keel init --stack <name>` flag in `kuru.py` (small change:
+- Wire an optional `kuru init --stack <name>` flag in `kuru.py` (small change:
   pick which config template to copy; default stays the current `config.json`).
-- Acceptance: `keel init --stack python` writes a config whose gates are pytest /
-  ruff / mypy; existing `keel init` is unchanged.
+- Acceptance: `kuru init --stack python` writes a config whose gates are pytest /
+  ruff / mypy; existing `kuru init` is unchanged.
 
 ### T5 — `init.sh` generation for target repos  (optional, nice-to-have)
 The long-running-agents article recommends an `init.sh` that starts the env in
-one command. Add a `templates/init.sh` and have `keel init` drop a stub into
+one command. Add a `templates/init.sh` and have `kuru init` drop a stub into
 `.kuru/` for the user to fill, and reference it from `progress.md`'s "How to run".
 - Acceptance: `.kuru/init.sh` exists after init and is referenced by progress.md.
 

@@ -29,7 +29,7 @@ encodes the hard-won patterns from three harness-design articles:
   component encodes an assumption about what the model can't yet do on its own,
   so keep gates deterministic and measurable.
 
-**The core thesis of keel:** facts that gate progress (does a slice exist, what
+**The core thesis of kuru:** facts that gate progress (does a slice exist, what
 state is it in, did the tests/typecheck/lint/build pass) must live in
 machine-checked files, never in an agent's narration. Agents reason and write
 prose; a tiny deterministic engine (`kuru.py`) owns the truth.
@@ -70,7 +70,7 @@ any → blocked → (unblock to anywhere)        done → in_progress (reopen)
 Hard rules enforced in code (already implemented in `kuru.py`):
 - Illegal transitions are rejected.
 - A slice **cannot** enter `verified` unless a recorded gate run exists **and**
-  passed (`keel gate <id>` must have been run green).
+  passed (`kuru gate <id>` must have been run green).
 - `--by builder` may not set `verified` or `reviewed`.
 
 ---
@@ -135,7 +135,7 @@ state into this plugin repo.
     ├── contract.yml        # FROZEN definition-of-done + acceptance criteria
     ├── build-log.md        # builder's running notes
     ├── verification.md     # verifier's evidence-backed verdict
-    └── gate-results.json   # written by `keel gate` (machine truth)
+    └── gate-results.json   # written by `kuru gate` (machine truth)
 ```
 
 ---
@@ -177,15 +177,15 @@ Per-command spec:
 
 | File | `description` | Body must do |
 |---|---|---|
-| `charter.md` | "Run a discovery session and write the shared-understanding charter." | Invoke the `kuru-method` + (a new) charter guidance; interview the user for problem, stakeholders, success metrics, constraints, non-goals; write/update `.kuru/charter.md`. If no `.kuru/` exists, instruct running `keel init` first (offer to run it). |
+| `charter.md` | "Run a discovery session and write the shared-understanding charter." | Invoke the `kuru-method` + (a new) charter guidance; interview the user for problem, stakeholders, success metrics, constraints, non-goals; write/update `.kuru/charter.md`. If no `.kuru/` exists, instruct running `kuru init` first (offer to run it). |
 | `prd.md` | "Turn the charter into a PRD for a feature/epic." | Use the `writing-prds` skill. Read `.kuru/charter.md`. Dispatch the **kuru-planner** subagent to draft `.kuru/prd/<feature>.md`. Argument = feature name. |
-| `slice.md` | "Decompose a PRD into vertical slices with frozen contracts." | Use the `slicing-work` skill. Read the named PRD. For each slice: `keel new-slice "<title>"`, then fill `slice.md` + `contract.yml`, then `keel set-status <id> ready`. Argument = PRD/feature name. |
-| `build.md` | "Build the next ready slice (or a named one) via the builder subagent." | Use `building-a-slice`. Resolve target via `keel next` or `$1`. Dispatch **kuru-builder** subagent on exactly one slice. After it returns, show `keel show <id>`. |
+| `slice.md` | "Decompose a PRD into vertical slices with frozen contracts." | Use the `slicing-work` skill. Read the named PRD. For each slice: `kuru new-slice "<title>"`, then fill `slice.md` + `contract.yml`, then `kuru set-status <id> ready`. Argument = PRD/feature name. |
+| `build.md` | "Build the next ready slice (or a named one) via the builder subagent." | Use `building-a-slice`. Resolve target via `kuru next` or `$1`. Dispatch **kuru-builder** subagent on exactly one slice. After it returns, show `kuru show <id>`. |
 | `verify.md` | "Independently verify a built slice against its frozen contract." | Use `verifying-a-slice`. **Must** dispatch the **kuru-verifier** subagent (a different agent than built it). Argument = slice id (default: first `built`). |
-| `review.md` | "Code-review a verified slice and mark it reviewed." | Run the existing `/code-review` (high effort) on the slice's diff; summarize findings; if clean, `keel set-status <id> reviewed --by reviewer`. |
-| `status.md` | "Show the delivery dashboard." | Run `keel ls` and `keel next`; summarize what's blocked / awaiting verification; surface any failing gate-results.json. |
-| `next.md` | "Print and start the next actionable slice." | Run `keel next`; based on its status, suggest the matching `/kuru:*` command. |
-| `bearings.md` | "Get your bearings at the start of a session (context reset recovery)." | The session-startup ritual: read `.kuru/progress.md`, `keel ls`, recent git log, run `kuru doctor`; summarize where things stand and the single next action. This is the antidote to context-reset amnesia. |
+| `review.md` | "Code-review a verified slice and mark it reviewed." | Run the existing `/code-review` (high effort) on the slice's diff; summarize findings; if clean, `kuru set-status <id> reviewed --by reviewer`. |
+| `status.md` | "Show the delivery dashboard." | Run `kuru ls` and `kuru next`; summarize what's blocked / awaiting verification; surface any failing gate-results.json. |
+| `next.md` | "Print and start the next actionable slice." | Run `kuru next`; based on its status, suggest the matching `/kuru:*` command. |
+| `bearings.md` | "Get your bearings at the start of a session (context reset recovery)." | The session-startup ritual: read `.kuru/progress.md`, `kuru ls`, recent git log, run `kuru doctor`; summarize where things stand and the single next action. This is the antidote to context-reset amnesia. |
 
 ### 3.3 Subagents (`agents/*.md`)
 
@@ -216,8 +216,8 @@ PRDs into candidate slice boundaries.
      criteria, plus tests, plus observability hooks the NFRs require.
   4. Append to `build-log.md`: decisions, files touched, how each acceptance
      criterion is satisfied, anything deferred.
-  5. Run `keel gate <id>`. If red, fix and re-run. Only when green:
-     `keel set-status <id> built --by builder`.
+  5. Run `kuru gate <id>`. If red, fix and re-run. Only when green:
+     `kuru set-status <id> built --by builder`.
   6. **You may not set `verified`.** End by telling the orchestrator the slice is
      ready for an independent verifier. Resist "context anxiety" — do not declare
      done early to save tokens; if you can't finish, set `blocked` with a note.
@@ -240,8 +240,8 @@ PRDs into candidate slice boundaries.
      cited evidence, plus any out-of-contract bugs found (granular, like
      "`fillRectangle` exists but never fires on mouseUp").
   5. Verdict:
-     - All criteria PASS + gates green → `keel set-status <id> verified --by verifier`.
-     - Otherwise → `keel set-status <id> rejected --by verifier` with a note
+     - All criteria PASS + gates green → `kuru set-status <id> verified --by verifier`.
+     - Otherwise → `kuru set-status <id> rejected --by verifier` with a note
        listing exactly what failed. Be specific enough that the builder can act
        without re-reading your whole report.
   6. Do not negotiate the contract down to make it pass. If the contract itself
@@ -303,7 +303,7 @@ carefully; the bullets below are requirements, not filler.
 - `description`: "Use when implementing a single Kurukuru slice."
 - Body mirrors the builder subagent's procedure (§3.3) but as reusable
   methodology: read frozen contract → match existing patterns → vertical change +
-  tests + observability → update build-log with how each AC is met → `keel gate`
+  tests + observability → update build-log with how each AC is met → `kuru gate`
   green → `set-status built`. Emphasize: never edit the contract to fit the code;
   never set `verified`; resist context-anxiety early-stopping (set `blocked` with
   a note instead of faking done).
@@ -419,7 +419,7 @@ Headings: `# Build log — {{ID}} {{TITLE}}`; running list of **Decisions**,
 
 ### 5.8 `templates/verification.md`
 The verifier's evidence record. Headings: `# Verification — {{ID}} {{TITLE}}`,
-verifier + `{{DATE}}`; **Gate run** (paste `keel gate` summary), then a
+verifier + `{{DATE}}`; **Gate run** (paste `kuru gate` summary), then a
 **Per-criterion findings** table: `AC-id | PASS/FAIL | evidence (observed fact)`;
 **Out-of-contract bugs found**; **Verdict** (`verified` | `rejected`) + rationale.
 
@@ -429,11 +429,11 @@ verifier + `{{DATE}}`; **Gate run** (paste `keel gate` summary), then a
 
 ### 6.1 `README.md` (overwrite the empty stub)
 Spec — sections required:
-1. **What keel is** (1 paragraph) + the pipeline diagram.
+1. **What kuru is** (1 paragraph) + the pipeline diagram.
 2. **Why** — the three articles and the one-line lesson taken from each (§1).
 3. **Install** — how to add as a Claude Code plugin (local plugin dir / add to a
    marketplace); requires `python3`.
-4. **Quickstart** — in a target repo: `keel init` → edit `config.json` gates →
+4. **Quickstart** — in a target repo: `kuru init` → edit `config.json` gates →
    `/kuru:charter` → `/kuru:prd <feature>` → `/kuru:slice <feature>` →
    `/kuru:build` → `/kuru:verify` → `/kuru:review`.
 5. **The state machine + hard rules** (§1).
@@ -445,7 +445,7 @@ Spec — sections required:
 
 ## 7. Implementation slices (build in this order)
 
-Eat our own dog food: build keel as keel would. Each slice below is vertical and
+Eat our own dog food: build kuru as kuru would. Each slice below is vertical and
 independently verifiable. Do them in order; don't start one until the prior one's
 acceptance criteria pass.
 
@@ -456,21 +456,23 @@ Acceptance:
 - `python3 scripts/kuru.py init` in an empty temp dir creates `.kuru/` with
   `config.json`, `ledger.json`, `charter.md`, `progress.md`, `README.md` — no
   errors (proves every template `init` needs exists and renders).
-- `keel doctor` reports healthy.
-- `keel new-slice "demo"` creates `SL-0001/` with all four artifacts and a ledger
+- `kuru doctor` reports healthy.
+- `kuru new-slice "demo"` creates `SL-0001/` with all four artifacts and a ledger
   entry in `draft`.
-- `keel ls` shows it; `keel next` reports it needs a contract.
+- `kuru ls` shows it; `kuru next` reports it needs a contract.
 
 **SL-2 — Status + gate enforcement proven.**
 No new files; this validates the engine rules against a throwaway repo.
 Acceptance (run in a temp repo whose `config.json` gates are trivial, e.g.
 `{"echo": {"cmd": "true", "required": true}}` and one `{"cmd": "false"}`):
-- `keel set-status SL-0001 verified` fails with "no gate run".
-- After `keel gate SL-0001` with a failing gate, `set-status … verified` still
+- Drive the slice to `verifying` (`ready → in_progress → built → verifying`).
+  From there, `set-status SL-0001 verified` fails with "no gate run".
+- After `kuru gate SL-0001` with a failing gate, `set-status … verified` still
   fails ("gate FAILED").
-- With all gates passing, `set-status SL-0001 built` then `verified --by verifier`
-  succeeds; `verified --by builder` is refused.
-- An illegal jump (`draft → done`) is refused.
+- With all gates passing, `set-status SL-0001 verified --by verifier` succeeds;
+  `verified --by builder` is refused.
+- An illegal jump (`draft → done`, or `built → verified` skipping `verifying`) is
+  refused.
 Document these four checks in the README's design section as the guarantees.
 
 **SL-3 — Skills (the methodology).**
@@ -502,9 +504,9 @@ Files: `README.md` (§6.1). Acceptance:
 - README satisfies §6.1.
 - A scripted dry run passes: in a temp Node-ish repo, `init` → `new-slice` → fill
   a trivial contract → `set-status ready` → `set-status in_progress` →
-  `set-status built` → `gate` (green) → `set-status verified --by verifier` →
-  `reviewed --by reviewer` → `done`, with no engine errors and `keel ls` ending
-  all-`done`.
+  `set-status built` → `gate` (green) → `set-status verifying --by verifier` →
+  `set-status verified --by verifier` → `reviewed --by reviewer` → `done`, with no
+  engine errors and `kuru ls` ending all-`done`.
 
 ---
 

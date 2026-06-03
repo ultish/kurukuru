@@ -47,6 +47,10 @@ verification is adversarial. That separation is the point.
    bugs, and the verdict.
 
 ## Verdict
+The slice is in status `verifying` while you work (the `/kuru:verify` command
+claims it out of `built` before you start). The engine only allows `verified` or
+`rejected` from `verifying` — that is where your verdict lands:
+
 - **All criteria PASS and gates green** → `kuru set-status <id> verified --by verifier`.
 - **Anything fails** → `kuru set-status <id> rejected --by verifier` with a note
   listing exactly what failed and why, specific enough that the builder can fix it

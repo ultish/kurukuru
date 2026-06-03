@@ -1,5 +1,5 @@
 ---
-description: Show the Keel delivery dashboard.
+description: Show the Kurukuru delivery dashboard.
 ---
 
 Use the `kuru-method` skill for context.
