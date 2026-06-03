@@ -1,0 +1,10 @@
+{
+  "project": "{{PROJECT}}",
+  "_help": "Python preset (pytest / ruff / mypy). Each gate runs in the repo root; every required gate must exit 0 before a slice can be marked verified. Adjust paths/targets to match this repo; delete gates you don't have; add coverage/integration gates you do.",
+  "gates": {
+    "typecheck": { "cmd": "mypy .",        "required": true, "timeout": 600 },
+    "lint":      { "cmd": "ruff check .",  "required": true, "timeout": 600 },
+    "unit":      { "cmd": "pytest -q",     "required": true, "timeout": 1200 }
+  },
+  "session_budget_hint": "A slice should fit one agent session: ~1 vertical behavior, < ~10 files touched, tests included. If it won't fit in your head, split it."
+}

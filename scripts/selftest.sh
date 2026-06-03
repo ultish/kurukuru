@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# selftest.sh — regression test for the kuru engine's guarantees.
+#
+# Reproduces impl/BUILD_PLAN.md §7 SL-1 / SL-2 / SL-6 (plus the verifying-state and
+# --stack behaviors) in throwaway temp dirs. Exits non-zero on the first failure,
+# so the harness can self-check (`scripts/selftest.sh`).
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export CLAUDE_PLUGIN_ROOT="$ROOT"
+KURU="python3 $ROOT/scripts/kuru.py"
+
+pass=0
+fail() { echo "FAIL: $*" >&2; exit 1; }
+ok()   { pass=$((pass+1)); echo "  ok: $*"; }
+
+# expect_ok "<desc>" <cmd...>        — command must exit 0
+expect_ok()   { local d="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$d"; else fail "$d (expected exit 0)"; fi; }
+# expect_fail "<desc>" "<substr>" <cmd...> — command must exit non-zero AND stderr contain substr
+expect_fail() {
+  local d="$1" sub="$2"; shift 2
+  local out; out="$("$@" 2>&1)"; local rc=$?
+  if [ $rc -eq 0 ]; then fail "$d (expected non-zero exit)"; fi
+  case "$out" in *"$sub"*) ok "$d" ;; *) fail "$d (missing '$sub' in: $out)" ;; esac
+}
+
+newrepo() { local d; d="$(mktemp -d)"; cd "$d" || exit 1; git init -q 2>/dev/null || true; echo "$d"; }
+trivial_gates() { printf '{"project":"t","gates":{"unit":{"cmd":"true","required":true,"timeout":60}}}\n' > .kuru/config.json; }
+
+echo "== SL-1: init + new-slice scaffold =="
+newrepo >/dev/null
+expect_ok   "init scaffolds .kuru" $KURU init
+for f in config.json ledger.json charter.md progress.md README.md init.sh; do
+  [ -f ".kuru/$f" ] && ok "init wrote $f" || fail "init missing $f"
+done
+[ -x ".kuru/init.sh" ] && ok "init.sh is executable" || fail "init.sh not executable"
+expect_ok   "doctor healthy" $KURU doctor
+expect_ok   "new-slice creates SL-0001" $KURU new-slice "demo"
+for f in slice.md contract.yml build-log.md verification.md; do
+  [ -f ".kuru/slices/SL-0001/$f" ] && ok "slice artifact $f" || fail "missing slice artifact $f"
+done
+
+echo "== SL-4 (engine slice of it): --stack presets =="
+newrepo >/dev/null
+expect_ok "init --stack python" $KURU init --stack python
+grep -q "pytest" .kuru/config.json && grep -q "ruff" .kuru/config.json && grep -q "mypy" .kuru/config.json \
+  && ok "python preset has pytest/ruff/mypy" || fail "python preset gates wrong"
+newrepo >/dev/null
+expect_ok "init --stack go" $KURU init --stack go
+grep -q "go test" .kuru/config.json && grep -q "go vet" .kuru/config.json && grep -q "go build" .kuru/config.json \
+  && ok "go preset has test/vet/build" || fail "go preset gates wrong"
+newrepo >/dev/null
+expect_fail "unknown --stack errors" "missing template" $KURU init --stack nope
+
+echo "== SL-2: status + gate enforcement =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+expect_fail "illegal draft->done refused" "illegal transition" $KURU set-status SL-0001 done
+$KURU set-status SL-0001 ready >/dev/null
+$KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null
+expect_fail "built->verified skips verifying, refused" "illegal transition" $KURU set-status SL-0001 verified --by verifier
+$KURU set-status SL-0001 verifying --by verifier >/dev/null
+expect_fail "verified with no gate run refused" "no gate run" $KURU set-status SL-0001 verified --by verifier
+
+# failing gate blocks verify
+newrepo >/dev/null
+$KURU init >/dev/null
+printf '{"project":"t","gates":{"unit":{"cmd":"false","required":true,"timeout":60}}}\n' > .kuru/config.json
+$KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+expect_fail "failing gate blocks verify" "gate" $KURU set-status SL-0001 verified --by verifier
+
+# builder cannot self-certify even with green gates
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by builder >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+expect_fail "builder cannot set verified" "builder may not" $KURU set-status SL-0001 verified --by builder
+
+echo "== deps: --json + dependency chains =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "skeleton" >/dev/null
+$KURU new-slice "needs 1" --depends-on SL-0001 >/dev/null
+$KURU set-status SL-0001 ready >/dev/null
+$KURU set-status SL-0002 ready >/dev/null
+# next --json must pick SL-0001 (SL-0002 is dep-blocked)
+nx="$($KURU next --json)"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "build"' \
+  && ok "next --json picks the unblocked slice" || fail "next --json wrong: $nx"
+expect_fail "ready->in_progress refused while dep unmet" "unmet dependencies" $KURU set-status SL-0002 in_progress
+# drive SL-0001 to done, then SL-0002 unblocks
+$KURU set-status SL-0001 in_progress >/dev/null; $KURU set-status SL-0001 built --by builder >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU set-status SL-0001 verified --by verifier >/dev/null
+$KURU set-status SL-0001 reviewed --by reviewer >/dev/null; $KURU set-status SL-0001 done >/dev/null
+nx="$($KURU next --json)"
+echo "$nx" | grep -q '"id": "SL-0002"' && ok "next --json unblocks dependent after dep done" || fail "still blocked: $nx"
+expect_ok "ready->in_progress now allowed" $KURU set-status SL-0002 in_progress
+# doctor catches an unknown dependency
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "bad dep" --depends-on SL-9999 >/dev/null
+expect_fail "doctor flags unknown dependency" "unknown slice" $KURU doctor
+# ls --json emits an array
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "a" >/dev/null
+$KURU ls --json | python3 -c "import json,sys; a=json.load(sys.stdin); assert isinstance(a,list) and a[0]['id']=='SL-0001'" \
+  && ok "ls --json is a parseable array" || fail "ls --json bad"
+
+echo "== SL-6: full draft->done lifecycle runs clean =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "ship it" >/dev/null
+expect_ok "ready"      $KURU set-status SL-0001 ready
+expect_ok "in_progress" $KURU set-status SL-0001 in_progress
+expect_ok "built"      $KURU set-status SL-0001 built --by builder
+expect_ok "gate green" $KURU gate SL-0001
+expect_ok "verifying"  $KURU set-status SL-0001 verifying --by verifier
+expect_ok "verified"   $KURU set-status SL-0001 verified --by verifier
+expect_ok "reviewed"   $KURU set-status SL-0001 reviewed --by reviewer
+expect_ok "done"       $KURU set-status SL-0001 done
+$KURU ls --status done | grep -q SL-0001 && ok "board ends all-done" || fail "slice not done"
+
+echo
+echo "ALL PASS ($pass checks)"

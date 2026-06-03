@@ -32,6 +32,26 @@ validation** — exactly the work suited to a cheaper model.
   Code session (command/agent discovery; real end-to-end dry-run). Can't be done
   headlessly. See those tasks below.
 
+### Beyond the original list (added since)
+
+- ✅ **Headless bridge proven** — `scripts/smoke-headless.sh` runs
+  `claude -p "/kuru:status" --plugin-dir <here> --permission-mode bypassPermissions`
+  in a throwaway repo and confirms the plugin command resolves and runs `kuru.py`
+  in that fresh session.
+- ✅ **Machine-readable state** — `kuru next|ls|show --json` for external tooling.
+- ✅ **Dependency chains** — `new-slice --depends-on …`; `next` skips
+  dependency-blocked slices; engine refuses `ready → in_progress` until deps are
+  `done`; `doctor` flags unknown deps. (Parallel building of independent slices:
+  planned upgrade.)
+- ✅ **External autonomous runner** — `runner.py` (repo root): a plain Python loop that
+  reads `kuru next --json` and launches a fresh `claude -p` per step
+  (build/verify/review), with retry caps, stall/blocked detection, precondition
+  gating, and configurable permissions. In-session `/kuru:loop` retained for
+  testing without the runner.
+- ⬜ **Still unproven: a full autonomous end-to-end run** of `runner.py` (multi
+  `claude -p` sessions actually driving a real slice ready→done). That's T3-scale
+  (needs a real repo + contract); the bridge, decisions, and gates are all proven.
+
 ## Tasks for the follow-up (cheaper) model
 
 ### T1 — Install & discovery smoke test  (verification, ~15 min)

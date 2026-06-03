@@ -144,6 +144,45 @@ def next_id(led: dict) -> str:
     return f"SL-{n:04d}"
 
 
+# Which /kuru:* step advances a slice in a given status (used by `next` and the
+# external runner to decide what to dispatch).
+STATUS_ACTION = {
+    "verifying": "verify",   # a verification was claimed but not finished -> re-verify
+    "built": "verify",
+    "rejected": "build",
+    "in_progress": "build",
+    "ready": "build",
+    "verified": "review",
+    "draft": "slice",        # needs a human to slice/contract it
+}
+
+
+def deps_of(s: dict) -> list[str]:
+    return [d.upper() for d in (s.get("depends_on") or [])]
+
+
+def done_ids(led: dict) -> set[str]:
+    return {s["id"] for s in led["slices"] if s["status"] == "done"}
+
+
+def unmet_deps(led: dict, s: dict) -> list[str]:
+    done = done_ids(led)
+    return [d for d in deps_of(s) if d not in done]
+
+
+def pick_next(led: dict) -> dict | None:
+    """The next actionable slice in pipeline order, skipping `ready` slices whose
+    dependencies aren't `done` yet."""
+    order = ["verifying", "built", "rejected", "in_progress", "ready", "verified", "draft"]
+    for st in order:
+        cands = [s for s in led["slices"] if s["status"] == st]
+        if st == "ready":
+            cands = [s for s in cands if not unmet_deps(led, s)]
+        if cands:
+            return cands[0]
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # commands
 # --------------------------------------------------------------------------- #
@@ -191,11 +230,15 @@ def cmd_new_slice(args):
     (sdir / "build-log.md").write_text(render(read_template("build-log.md"), **fields))
     (sdir / "verification.md").write_text(render(read_template("verification.md"), **fields))
 
+    deps = []
+    if getattr(args, "depends_on", None):
+        deps = [d.strip().upper() for d in args.depends_on.split(",") if d.strip()]
     led["slices"].append({
         "id": sid,
         "title": args.title,
         "epic": args.epic,
         "status": "draft",
+        "depends_on": deps,
         "created": now(),
         "updated": now(),
         "history": [{"at": now(), "status": "draft", "by": "human", "note": "created"}],
@@ -211,6 +254,9 @@ def cmd_ls(args):
     rows = led["slices"]
     if args.status:
         rows = [s for s in rows if s["status"] == args.status]
+    if getattr(args, "json", False):
+        print(json.dumps(rows))
+        return
     if not rows:
         print("(no slices)")
         return
@@ -227,9 +273,17 @@ def cmd_show(args):
     if not s:
         die(f"no slice {args.id}")
     sdir = kuru_dir() / "slices" / s["id"]
+    artfiles = ("slice.md", "contract.yml", "build-log.md", "verification.md", "gate-results.json")
+    if getattr(args, "json", False):
+        out = dict(s)
+        out["artifacts"] = {f: (sdir / f).exists() for f in artfiles}
+        out["gate"] = _latest_gate(s["id"])
+        out["rejections"] = sum(1 for h in s.get("history", []) if h.get("status") == "rejected")
+        print(json.dumps(out, indent=2))
+        return
     print(json.dumps(s, indent=2))
     print("\nartifacts:")
-    for f in ("slice.md", "contract.yml", "build-log.md", "verification.md", "gate-results.json"):
+    for f in artfiles:
         p = sdir / f
         print(f"  {'✓' if p.exists() else '·'} {p}")
 
@@ -237,7 +291,6 @@ def cmd_show(args):
 def cmd_next(args):
     """The next thing a human/agent should pick up, in pipeline order."""
     led = load_ledger()
-    order = ["verifying", "built", "rejected", "in_progress", "ready", "verified", "draft"]
     label = {
         "verifying": "needs a verifier",
         "built": "ready to verify",
@@ -247,15 +300,45 @@ def cmd_next(args):
         "verified": "ready for code review",
         "draft": "needs a contract before it can be built",
     }
-    for st in order:
-        cand = [s for s in led["slices"] if s["status"] == st]
-        if cand:
-            s = cand[0]
-            print(f"{s['id']}  [{st}]  {s['title']}")
-            print(f"  -> {label[st]}")
-            print(f"  -> {kuru_dir() / 'slices' / s['id']}")
+    s = pick_next(led)
+    use_json = getattr(args, "json", False)
+
+    if s is None:
+        waiting = [(x["id"], unmet_deps(led, x)) for x in led["slices"]
+                   if x["status"] == "ready" and unmet_deps(led, x)]
+        blocked = [x["id"] for x in led["slices"] if x["status"] == "blocked"]
+        reason = "waiting_on_deps" if waiting else "blocked_present" if blocked else "all_done"
+        if use_json:
+            print(json.dumps({
+                "next_action": "none", "id": None, "status": None, "reason": reason,
+                "waiting": [{"id": i, "unmet": u} for i, u in waiting],
+                "blocked": blocked,
+            }))
             return
-    print("No actionable slices. Either everything is done/blocked, or run /kuru:slice.")
+        if waiting:
+            print("No actionable slices right now — waiting on dependencies:")
+            for i, u in waiting:
+                print(f"  {i} blocked by {', '.join(u)}")
+        elif blocked:
+            print("No actionable slices. Blocked slices need a human:")
+            for i in blocked:
+                print(f"  {i}")
+        else:
+            print("No actionable slices. Everything is done, or run /kuru:slice.")
+        return
+
+    action = STATUS_ACTION[s["status"]]
+    if use_json:
+        print(json.dumps({
+            "next_action": action, "id": s["id"], "status": s["status"],
+            "title": s["title"], "epic": s.get("epic"), "depends_on": deps_of(s),
+            "label": label[s["status"]],
+            "dir": str(kuru_dir() / "slices" / s["id"]),
+        }))
+        return
+    print(f"{s['id']}  [{s['status']}]  {s['title']}")
+    print(f"  -> {label[s['status']]}")
+    print(f"  -> {kuru_dir() / 'slices' / s['id']}")
 
 
 def cmd_set_status(args):
@@ -281,6 +364,14 @@ def cmd_set_status(args):
                 f"({gr['summary']}). Fix and re-run `kuru gate {s['id']}`.")
     if new in {"verified", "reviewed"} and args.by == "builder":
         die(f"a builder may not set '{new}'. This requires the verifier/reviewer (--by human|verifier).")
+
+    # Hard gate: cannot START a build (ready -> in_progress) while dependencies
+    # are unfinished. Resuming (rejected/done -> in_progress) is unaffected.
+    if new == "in_progress" and cur == "ready":
+        unmet = unmet_deps(led, s)
+        if unmet:
+            die(f"cannot start {s['id']}: unmet dependencies {', '.join(unmet)} "
+                f"(each must be 'done' first).")
 
     s["status"] = new
     s["updated"] = now()
@@ -384,7 +475,12 @@ def cmd_doctor(args):
     except Exception as e:
         problems.append(f"config.json invalid: {e}")
     try:
-        load_json(kd / "ledger.json")
+        led = load_json(kd / "ledger.json")
+        ids = {s["id"] for s in led.get("slices", [])}
+        for s in led.get("slices", []):
+            for d in deps_of(s):
+                if d not in ids:
+                    problems.append(f"{s['id']} depends on unknown slice {d}")
     except Exception as e:
         problems.append(f"ledger.json invalid: {e}")
     if problems:
@@ -410,11 +506,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("new-slice"); s.add_argument("title"); s.add_argument("--epic", default=None)
+    s.add_argument("--depends-on", dest="depends_on", default=None,
+                   help="comma-separated slice ids this slice depends on, e.g. SL-0001,SL-0002")
     s.set_defaults(fn=cmd_new_slice)
 
-    s = sub.add_parser("ls"); s.add_argument("--status", default=None); s.set_defaults(fn=cmd_ls)
-    s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
-    s = sub.add_parser("next"); s.set_defaults(fn=cmd_next)
+    s = sub.add_parser("ls"); s.add_argument("--status", default=None)
+    s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_ls)
+    s = sub.add_parser("show"); s.add_argument("id")
+    s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_show)
+    s = sub.add_parser("next"); s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_next)
 
     s = sub.add_parser("set-status"); s.add_argument("id"); s.add_argument("status")
     s.add_argument("--note", default=""); s.add_argument("--by", default="human",

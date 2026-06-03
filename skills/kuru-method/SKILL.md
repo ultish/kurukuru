@@ -32,6 +32,13 @@ charter -> prd -> slice -> build -> verify -> review -> done
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
 - **review** — code review on the diff. (`/kuru:review`)
 
+The first three phases need a human. Once every slice has a frozen contract, the
+build → verify → review → done cycle is mechanical and can be driven
+automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,
+spawning a fresh builder and a **separate** verifier per slice, and stops on any
+`blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
+runs charter/PRD/slicing for you.
+
 ## The slice state machine (enforced by kuru.py)
 
 ```
@@ -46,6 +53,8 @@ Three rules are enforced **in code** — you cannot talk your way past them:
 2. A slice cannot reach `verified` unless a recorded gate run exists **and**
    passed (`kuru gate <id>` must be green).
 3. `--by builder` may not set `verified` or `reviewed`.
+4. A slice cannot **start** (`ready → in_progress`) while any of its
+   `--depends-on` slices is not `done`.
 
 ## Two non-negotiable disciplines
 
@@ -81,11 +90,11 @@ Invoke as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" <cmd>`.
 
 | Command | Effect |
 |---|---|
-| `init [--force]` | Scaffold `.kuru/` in cwd. |
-| `new-slice "<title>" [--epic E]` | Create `SL-NNNN` + artifacts; status `draft`. |
-| `ls [--status S]` | Table of slices. |
-| `show <id>` | Slice JSON + artifact presence. |
-| `next` | Next actionable slice, in pipeline order. |
+| `init [--force] [--stack node\|python\|go]` | Scaffold `.kuru/` in cwd (optionally with a stack's gate preset). |
+| `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..]` | Create `SL-NNNN` + artifacts; status `draft`. |
+| `ls [--status S] [--json]` | Table (or JSON array) of slices. |
+| `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
+| `next [--json]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). |
 | `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer]` | Guarded transition. |
 | `gate <id>` | Run config gates; write `gate-results.json`; non-zero on fail. |
 | `check <id>` | Read-only: may this slice reach `verified`? |
