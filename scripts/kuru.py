@@ -155,21 +155,26 @@ def cmd_init(args):
     for sub in ("", "slices", "prd"):
         (kd / sub).mkdir(parents=True, exist_ok=True)
 
+    config_src = f"config.{args.stack}.json" if args.stack else "config.json"
     seed = {
-        "config.json": read_template("config.json"),
+        "config.json": render(read_template(config_src), PROJECT=root.name),
         "ledger.json": json.dumps(
             {"meta": {"project": root.name, "created": now()}, "slices": []}, indent=2
         ) + "\n",
         "charter.md": render(read_template("charter.md"), DATE=now(), PROJECT=root.name),
         "progress.md": render(read_template("progress.md"), DATE=now(), PROJECT=root.name),
         "README.md": read_template("workspace-readme.md"),
+        "init.sh": render(read_template("init.sh"), PROJECT=root.name),
     }
     for name, content in seed.items():
         path = kd / name
         if path.exists() and not args.force:
             continue
         path.write_text(content)
-    print(f"Initialized Kurukuru workspace at {kd}")
+        if name == "init.sh":
+            path.chmod(0o755)
+    print(f"Initialized Kurukuru workspace at {kd}"
+          + (f" (stack: {args.stack})" if args.stack else ""))
     print("Next: edit .kuru/config.json gates, then run /kuru:charter")
 
 
@@ -398,7 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init"); s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_init)
+    s = sub.add_parser("init")
+    s.add_argument("--force", action="store_true")
+    s.add_argument("--stack", default=None,
+                   help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. python|go|node)")
+    s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("new-slice"); s.add_argument("title"); s.add_argument("--epic", default=None)
     s.set_defaults(fn=cmd_new_slice)

@@ -56,8 +56,10 @@ as `/kuru:*`.
 
 ```bash
 # 1. scaffold the workspace
-python3 /path/to/kuru/scripts/kuru.py init     # creates ./.kuru/
+python3 /path/to/kuru/scripts/kuru.py init                  # creates ./.kuru/
+#    or seed gates for a stack:  init --stack python | go | node
 # 2. edit .kuru/config.json so the gates match this repo (typecheck/lint/test/build)
+#    and fill in .kuru/init.sh (one command to bring up the dev environment)
 ```
 
 Then, in Claude Code:
@@ -93,7 +95,8 @@ kuru/
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier
 ├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
-├── templates/       artifact templates copied into target repos
+├── scripts/selftest.sh  regression test for the engine's guarantees
+├── templates/       artifact templates (config[.stack].json, init.sh, …) copied into target repos
 ├── BUILD_PLAN.md    full implementation spec
 └── TASKS.md         what's left for a follow-up (cheaper) model
 ```
@@ -102,7 +105,7 @@ The `.kuru/` workspace (per target repo, created by `kuru init`):
 
 ```
 .kuru/
-├── config.json   ledger.json   charter.md   progress.md
+├── config.json   ledger.json   charter.md   progress.md   init.sh
 ├── prd/<feature>.md
 └── slices/<id>/  slice.md  contract.yml  build-log.md  verification.md  gate-results.json
 ```

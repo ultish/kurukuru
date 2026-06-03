@@ -17,6 +17,21 @@ validation** — exactly the work suited to a cheaper model.
     builder can't self-certify; illegal transition refused (SL-2).
   - Full `draft→done` lifecycle runs clean (SL-6).
 
+## Status (updated 2026-06-03)
+
+- ✅ **T2 done** — `scripts/selftest.sh` reproduces SL-1/SL-2/SL-6 (+ verifying
+  state, `--stack` presets, builder self-cert refusal). 33 checks, exits non-zero
+  on any failure.
+- ✅ **T4 done** — `templates/config.{python,go,node}.json` presets + `kuru init
+  --stack <name>`. Default `kuru init` unchanged.
+- ✅ **T5 done** — `templates/init.sh` stub dropped into `.kuru/` (executable),
+  referenced from `progress.md`'s "How to run / verify".
+- ✅ **T6 done** — README quickstart, `.kuru/` tree, and plugin tree reconciled
+  with the above.
+- ⬜ **T1, T3 still open** — both require loading the plugin into a live Claude
+  Code session (command/agent discovery; real end-to-end dry-run). Can't be done
+  headlessly. See those tasks below.
+
 ## Tasks for the follow-up (cheaper) model
 
 ### T1 — Install & discovery smoke test  (verification, ~15 min)

@@ -19,5 +19,7 @@ of your context._
 intentional. Save the next agent from re-discovering them. -->
 
 ## How to run / verify
-<!-- The command(s) to start the app and exercise it. Point at init.sh or the
-project's run skill. The verifier will need this. -->
+<!-- The command(s) to start the app and exercise it. `.kuru/init.sh` should bring
+up the environment in one command (fill in its TODOs); then note how to exercise
+the feature. The verifier will need this. -->
+Bring up the environment: `./.kuru/init.sh`
