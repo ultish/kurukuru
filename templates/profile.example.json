@@ -1,0 +1,24 @@
+{
+  "_help": "Reusable environment profile for `kuru init --profile <thisfile>`. Copy it OUTSIDE the plugin (e.g. ~/.kuru/profiles/gradle-kube.json) and edit for your org. 'stack' picks a gate preset; 'config' (if present) is used verbatim as .kuru/config.json (overrides 'stack'); 'environment' pre-answers the charter's Technical environment so you don't re-type it each project. Nothing here is secret-by-design — internal URLs are fine, but gitignore the profile if you prefer.",
+  "stack": "gradle",
+  "config": {
+    "_help": "OPTIONAL. Omit to just use the 'stack' preset. If present, this becomes .kuru/config.json verbatim (project name is filled in for you). Air-gapped example: gradle --offline against a populated cache.",
+    "gates": {
+      "lint":  { "cmd": "./gradlew --offline --console=plain check -x test", "required": false, "timeout": 900 },
+      "unit":  { "cmd": "./gradlew --offline --console=plain test",          "required": true,  "timeout": 1800 },
+      "build": { "cmd": "./gradlew --offline --console=plain assemble",      "required": true,  "timeout": 1800 }
+    }
+  },
+  "environment": {
+    "language": "Kotlin 2.0 / JDK 21",
+    "build_pipeline": "gradle (wrapper, --offline)",
+    "deploy_env": "Kubernetes",
+    "deploy_artifacts": "Helm chart -> internal container registry",
+    "airgap": {
+      "maven_mirror": "https://nexus.internal.example/repository/maven-public/",
+      "container_registry": "registry.internal.example/team",
+      "notes": "no internet during build; init.gradle points at the mirror; gradle runs --offline"
+    },
+    "reference_project": "git@internal.example:platform/service-template.git"
+  }
+}

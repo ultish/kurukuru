@@ -12,6 +12,8 @@ charter -> prd -> slice -> build -> verify -> review -> done
 | Path | What it is | Truth type |
 |---|---|---|
 | `config.json` | The deterministic gates for THIS repo (typecheck/lint/test/build). | machine |
+| `profile.json` | Optional. The environment profile passed to `kuru init --profile`. | reference |
+| `init.sh` | One command to bring up the dev environment (fill in its TODOs). | script |
 | `ledger.json` | Every slice + its status + full history. Single source of truth for state. | **machine** |
 | `charter.md` | Shared understanding. Precedes PRDs. | narrative |
 | `progress.md` | Cross-session handoff. Read first each session. | narrative |

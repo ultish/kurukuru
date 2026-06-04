@@ -26,18 +26,20 @@ Interview for, and do not assume:
 - Non-goals.
 - Open questions.
 
-**Technical environment (this drives `.kuru/config.json`).** Interview for these
-too — they decide the build pipeline and therefore the gate commands:
+**Technical environment (this drives `.kuru/config.json`).** First, **if
+`.kuru/profile.json` exists** (the user ran `kuru init --profile <file>`), read it —
+it pre-answers most of this. Confirm the values with the user instead of re-asking,
+and use its `config`/`stack` for the gates and its `environment` block to fill the
+charter. Otherwise interview for:
 - **Language & version** (e.g. TypeScript/Node 20, Kotlin 2.0 / JDK 21, Go 1.22,
   Java 21, Rust). Pin versions where they matter (JDK target, Node major).
 - **Build pipeline / tool** (npm, pnpm, gradle, maven, cargo, go) — this selects
   the config preset.
 - **Deploy environment** (Kubernetes, Docker, VM, serverless) and, if Kubernetes,
   **deployment artifacts** (Helm charts, raw k8s YAML, the container registry).
-- **Air-gapped / restricted constraints** — internal package registries (an
-  `.npmrc`/`settings.xml`/`init.gradle`/`.cargo/config.toml` pointing at an internal
-  mirror), offline build flags, no-internet during build. Capture the specifics so
-  the builder conforms to them.
+- **Air-gapped / restricted?** — whether there's internet during build and whether
+  internal package registries are in play. Keep it high-level here; the **exact
+  endpoint URLs are asked last and are skippable** (see below).
 - **Existing template or reference project** to copy conventions from (a path or
   repo). If one exists, read its build config and mirror its gate commands,
   registry settings, and project layout instead of inventing them.
@@ -59,6 +61,16 @@ including **Technical environment**).
 3. Confirm with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor`.
 If the build pipeline isn't one of the presets, write the four gates by hand to
 match how this repo actually typechecks / lints / tests / builds.
+
+**Air-gapped endpoints — ask LAST, and let the user skip.** If the environment is
+air-gapped/restricted, then toward the *end* of the discussion ask (via
+`AskUserQuestion`) for the concrete internal endpoints: package registry/mirror
+URLs (`.npmrc` registry, Maven/Gradle mirror, `.cargo` source), the container
+registry, and any required offline flags. **The user may skip these for later** —
+if they do, record them in the charter's Technical environment as
+`TBD — to provide` and do **not** block on them. If they're given, save them in the
+charter (and they inform `.kuru/init.sh` and the builder). This is the only part of
+the tech environment allowed to remain unresolved into slicing.
 
 **Resolve open questions here — don't punt them downstream.** The charter is the
 cheapest place to catch ambiguity. Before you finish, review the **Open questions**

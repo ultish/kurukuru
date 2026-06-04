@@ -10,7 +10,7 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init [--stack T]             scaffold .kuru/ in the current repo
+  kuru init [--stack T] [--profile FILE]   scaffold .kuru/ in the current repo
   kuru set-stack <tool>             rewrite config.json gates from a build-tool preset
   kuru new-slice "<title>" [--epic E]
   kuru ls [--status S]              list slices (table)
@@ -195,9 +195,26 @@ def cmd_init(args):
     for sub in ("", "slices", "prd"):
         (kd / sub).mkdir(parents=True, exist_ok=True)
 
-    config_src = f"config.{args.stack}.json" if args.stack else "config.json"
+    # Optional reusable environment profile (kept OUTSIDE the plugin by the user).
+    profile = None
+    if args.profile:
+        try:
+            profile = json.loads(Path(args.profile).read_text())
+        except Exception as e:
+            die(f"could not read --profile {args.profile}: {e}")
+
+    # Resolve config.json: explicit profile.config > profile.stack/--stack preset > node default.
+    if profile and isinstance(profile.get("config"), dict):
+        cfg = dict(profile["config"])
+        cfg.setdefault("project", root.name)
+        config_text = render(json.dumps(cfg, indent=2) + "\n", PROJECT=root.name)
+    else:
+        stack = (profile or {}).get("stack") or args.stack
+        config_src = f"config.{stack}.json" if stack else "config.json"
+        config_text = render(read_template(config_src), PROJECT=root.name)
+
     seed = {
-        "config.json": render(read_template(config_src), PROJECT=root.name),
+        "config.json": config_text,
         "ledger.json": json.dumps(
             {"meta": {"project": root.name, "created": now()}, "slices": []}, indent=2
         ) + "\n",
@@ -206,6 +223,9 @@ def cmd_init(args):
         "README.md": read_template("workspace-readme.md"),
         "init.sh": render(read_template("init.sh"), PROJECT=root.name),
     }
+    if profile is not None:
+        # Persist the profile so /kuru:charter can pre-fill from it.
+        seed["profile.json"] = json.dumps(profile, indent=2) + "\n"
     for name, content in seed.items():
         path = kd / name
         if path.exists() and not args.force:
@@ -213,9 +233,12 @@ def cmd_init(args):
         path.write_text(content)
         if name == "init.sh":
             path.chmod(0o755)
+    stack = (profile or {}).get("stack") or args.stack
     print(f"Initialized Kurukuru workspace at {kd}"
-          + (f" (stack: {args.stack})" if args.stack else ""))
-    print("Next: edit .kuru/config.json gates, then run /kuru:charter")
+          + (f" (stack: {stack})" if stack else "")
+          + (" (profile loaded)" if profile is not None else ""))
+    print("Next: run /kuru:charter (it will use .kuru/profile.json if present), "
+          "or edit .kuru/config.json gates.")
 
 
 def cmd_set_stack(args):
@@ -521,7 +544,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("init")
     s.add_argument("--force", action="store_true")
     s.add_argument("--stack", default=None,
-                   help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. python|go|node)")
+                   help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. node|pnpm|gradle|maven|go|python|cargo)")
+    s.add_argument("--profile", default=None,
+                   help="path to a reusable environment profile (JSON): {stack?, config?, environment?}. "
+                        "Saved to .kuru/profile.json; /kuru:charter pre-fills from it.")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("set-stack"); s.add_argument("stack",

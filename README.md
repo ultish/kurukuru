@@ -65,6 +65,7 @@ don't need it for manual `/kuru:*` use.
 # 1. scaffold the workspace
 python3 /path/to/kuru/scripts/kuru.py init                  # creates ./.kuru/
 #    or seed gates for a build tool: init --stack node|pnpm|gradle|maven|go|python|cargo
+#    or reuse a saved environment:   init --profile ~/.kuru/profiles/gradle-kube.json
 # 2. config.json gets configured for you during /kuru:charter (it interviews you about
 #    language, build pipeline, deploy env, and air-gapped constraints, then sets the gates).
 #    To (re)pick a preset manually:  kuru.py set-stack gradle   then tailor the commands.
@@ -96,6 +97,30 @@ Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
 spawn a fresh builder and a separate verifier per slice, respect inter-slice
 **dependencies**, and stop on any `blocked` slice or after `--max-retries`
 rejections. The manual `/kuru:*` commands still work alongside either.
+
+### Environment profiles (reuse a stack across projects)
+
+If you spin up many projects with the same stack — especially in an **air-gapped**
+org — save a reusable **profile** and pass it to `init`:
+
+```bash
+python3 /path/to/kuru/scripts/kuru.py init --profile ~/.kuru/profiles/gradle-kube.json
+```
+
+A profile is plain JSON you keep **outside the plugin** (see
+[`templates/profile.example.json`](templates/profile.example.json)):
+
+- `stack` — a gate preset (`node|pnpm|gradle|maven|go|python|cargo`), or
+- `config` — a full `config.json` used verbatim (e.g. gradle `--offline` against an
+  internal mirror), and
+- `environment` — language/version, deploy target, and **internal registry
+  endpoints**, which pre-fill the charter's Technical environment so you don't
+  re-type them each time.
+
+`init` writes the gates and stashes the profile at `.kuru/profile.json`;
+`/kuru:charter` reads it and confirms rather than re-interviewing. Internal
+endpoints you'd rather not commit can be left out of the profile and supplied at the
+end of the charter (which lets you skip them for later).
 
 ### Dependencies between slices
 

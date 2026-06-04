@@ -67,6 +67,19 @@ grep -q "cargo " .kuru/config.json && ok "config now cargo" || fail "set-stack c
 expect_ok "doctor healthy after set-stack" $KURU doctor
 expect_fail "set-stack unknown preset errors" "missing template" $KURU set-stack bogus
 
+echo "== init --profile: reusable environment profile =="
+newrepo >/dev/null
+prof="$(mktemp)"
+printf '{"stack":"gradle","config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}},"environment":{"language":"Kotlin/JDK21"}}\n' > "$prof"
+expect_ok "init --profile (explicit config)" $KURU init --profile "$prof"
+grep -q "gradlew test" .kuru/config.json && ok "profile config became .kuru/config.json" || fail "profile config not applied"
+[ -f .kuru/profile.json ] && grep -q "Kotlin/JDK21" .kuru/profile.json && ok "profile saved to .kuru/profile.json" || fail "profile.json missing"
+python3 -c "import json;assert json.load(open('.kuru/config.json'))['project']" && ok "profile config got a project name" || fail "no project in config"
+newrepo >/dev/null
+printf '{"stack":"pnpm"}\n' > "$prof"
+expect_ok "init --profile (stack only)" $KURU init --profile "$prof"
+grep -q "pnpm " .kuru/config.json && ok "stack-only profile picks the preset" || fail "stack-only profile failed"
+
 echo "== SL-2: status + gate enforcement =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null

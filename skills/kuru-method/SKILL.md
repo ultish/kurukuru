@@ -96,7 +96,7 @@ Invoke as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" <cmd>`.
 
 | Command | Effect |
 |---|---|
-| `init [--force] [--stack <tool>]` | Scaffold `.kuru/` in cwd (optionally with a build-tool gate preset). |
+| `init [--force] [--stack <tool>] [--profile FILE]` | Scaffold `.kuru/` (optionally from a build-tool preset or a reusable env profile). |
 | `set-stack <tool>` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. |
 | `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..]` | Create `SL-NNNN` + artifacts; status `draft`. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
