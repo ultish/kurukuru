@@ -7,7 +7,7 @@ Use the `kuru-method` skill for context.
 
 First ensure a Kurukuru workspace exists. If there is no `.kuru/` directory in the
 repo, tell the user and offer to run:
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" init`
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init`
 
 Then run a **discovery conversation** with the user to build shared understanding
 BEFORE any PRD. Focus: $ARGUMENTS
@@ -56,14 +56,14 @@ environment**), folding in every answer.
 **Then configure the gates for this stack.** Translate the build pipeline into
 `.kuru/config.json`:
 1. Seed it from the matching preset:
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" set-stack <tool>` — one of
+   `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack <tool>` — one of
    `node` `pnpm` `gradle` `maven` `go` `python` `cargo` (rewrites `config.json` from
    `templates/config.<tool>.json`).
 2. Then **tailor** the gate commands to this repo: exact task/script names, the
    JDK/Node version, monorepo subpaths, and any air-gapped flags (`--offline` for
    gradle, `-o` for maven, `--offline`/`.npmrc` for pnpm, vendored crates for cargo).
    If the user named a reference project, copy its commands.
-3. Confirm with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor`.
+3. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 If the build pipeline isn't a preset, write the four gates by hand to match how this
 repo actually typechecks / lints / tests / builds.
 

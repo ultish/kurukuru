@@ -4,7 +4,7 @@ description: Print and start the next actionable slice.
 
 Use the `kuru-method` skill for context.
 
-Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" next`. Based on the returned
+Run `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next`. Based on the returned
 status, recommend (and offer to start) the matching command:
 
 - `draft` → `/kuru:slice` (it still needs a frozen contract).

@@ -53,6 +53,14 @@ pip installs). Add the plugin directory to Claude Code (local plugin or via a
 marketplace entry); Claude Code auto-discovers `commands/`, `agents/`, and
 `skills/`. Commands appear as `/kuru:*`.
 
+**Engine path (recommended).** Commands call the engine as
+`${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}`. For the most reliable
+resolution — the plugin lives on your machine, separate from the repo you're
+working in — set **`KURU_PY`** to the absolute path of `scripts/kuru.py` in the
+kurukuru plugin's env (Claude Code plugin settings). It overrides everything. If
+you skip this, commands fall back to `${CLAUDE_PLUGIN_ROOT}` and then to the path
+`kuru init` records in `.kuru/engine`.
+
 **The runner (optional, for unattended runs).** [`runner.py`](runner.py) lives at
 the repo root — it is **not** part of the plugin, it's a separate driver that
 loops the plugin headlessly (see [Running headless](#running-headless-runnerpy)).

@@ -20,13 +20,13 @@ slice may be rejected/sent-back before the loop stops and asks for a human.
 Run these checks first; if any fails, STOP and tell the user exactly which command
 to run instead. Do **not** start charter/PRD/slicing yourself — those need a human.
 
-1. Workspace healthy: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor`.
+1. Workspace healthy: `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 2. A charter exists: `.kuru/charter.md` is present and filled in (not the empty
    template). If missing/empty → STOP, point to `/kuru:charter`.
 3. At least one PRD exists under `.kuru/prd/`. If none → STOP, point to `/kuru:prd`.
 4. Slices exist and are **contracted**:
-   - `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" ls` shows ≥1 slice.
-   - `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" ls --status draft` shows
+   - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls` shows ≥1 slice.
+   - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status draft` shows
      **none**. A `draft` slice still needs human slicing/contracting → STOP and
      point to `/kuru:slice` to finish (and freeze) it first.
 
@@ -35,7 +35,7 @@ to run instead. Do **not** start charter/PRD/slicing yourself — those need a h
 Repeat until a stop condition fires:
 
 1. Re-derive state from files (do not trust earlier chat): run
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" next` (it already skips
+   `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next` (it already skips
    dependency-blocked slices, so just act on what it returns). For an unattended
    run outside Claude, use the top-level `runner.py` instead — same logic in plain Python.
 2. If it prints **"No actionable slices"** → go to **Termination**.
@@ -60,7 +60,7 @@ Repeat until a stop condition fires:
   works. The engine refuses `verified --by builder`, but you must also not reuse
   the builder's context to verify.
 - **Cap the send-back cycle.** Before (re)building a `rejected` slice, read its
-  history (`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" show <id>`) and count how
+  history (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" show <id>`) and count how
   many times it has been `rejected` (or sent back by review). If that count ≥
   `max-reject-retries`, STOP: `set-status <id> blocked --note "exceeded N
   build/verify retries: <last failure>"` and hand to a human. Do not spin forever.

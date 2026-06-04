@@ -28,7 +28,11 @@ verifier. You build; you do not judge your own work.
    tradeoffs, files touched, and for **each AC** how it's satisfied and where the
    proof lives (test name, endpoint). This is what the verifier reads first.
 5. **Run the gates yourself.** `kuru gate <id>`. If red, fix and re-run until
-   green. Green gates are the floor, not the ceiling.
+   green. Green gates are the floor, not the ceiling. `kuru gate` streams each
+   gate's output live **and** writes it to `.kuru/slices/<id>/gate-<name>.log`, so a
+   long build (gradle, etc.) is watchable with `tail -f` and never looks "stuck".
+   When you run a long build/test command *outside* the gate, do the same — never
+   send its output to `/dev/null`; tee it to a log so progress is visible.
 6. **Hand off.** When gates are green and every AC is genuinely met:
    `kuru set-status <id> built --by builder`. Tell the orchestrator it's ready for
    an **independent** verifier. **You may not set `verified`** — the engine will

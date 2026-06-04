@@ -34,6 +34,7 @@ for f in config.json ledger.json charter.md progress.md README.md init.sh; do
   [ -f ".kuru/$f" ] && ok "init wrote $f" || fail "init missing $f"
 done
 [ -x ".kuru/init.sh" ] && ok "init.sh is executable" || fail "init.sh not executable"
+[ -f ".kuru/engine" ] && grep -q "kuru.py" .kuru/engine && ok "init records engine path (.kuru/engine)" || fail "engine path not recorded"
 expect_ok   "doctor healthy" $KURU doctor
 expect_ok   "new-slice creates SL-0001" $KURU new-slice "demo"
 for f in slice.md contract.yml build-log.md verification.md; do
@@ -147,6 +148,9 @@ expect_ok "ready"      $KURU set-status SL-0001 ready
 expect_ok "in_progress" $KURU set-status SL-0001 in_progress
 expect_ok "built"      $KURU set-status SL-0001 built --by builder
 expect_ok "gate green" $KURU gate SL-0001
+[ -f .kuru/slices/SL-0001/gate-unit.log ] && ok "gate writes a tailable log file" || fail "no gate log written"
+python3 -c "import json,sys; r=json.load(open('.kuru/slices/SL-0001/gate-results.json')); sys.exit(0 if r['gates'][0].get('log') else 1)" \
+  && ok "gate-results.json records the log path" || fail "gate result missing log path"
 expect_ok "verifying"  $KURU set-status SL-0001 verifying --by verifier
 expect_ok "verified"   $KURU set-status SL-0001 verified --by verifier
 expect_ok "reviewed"   $KURU set-status SL-0001 reviewed --by reviewer

@@ -9,9 +9,9 @@ Do NOT rely on anything from earlier chat; reconstruct state from files:
 
 1. Read `.kuru/progress.md` (current state, last session, the stated next action,
    known landmines, how to run/verify).
-2. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor` — confirm the workspace
+2. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor` — confirm the workspace
    is healthy.
-3. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" ls` and `... next`.
+3. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls` and `... next`.
 4. `git log --oneline -15` and `git status` to see recent work and any
    uncommitted changes.
 5. For the slice `next` points at, read its `slice.md` / `contract.yml` and its

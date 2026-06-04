@@ -34,6 +34,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+from collections import deque
 from pathlib import Path
 
 STATUSES = [
@@ -233,10 +235,19 @@ def cmd_init(args):
         path.write_text(content)
         if name == "init.sh":
             path.chmod(0o755)
+
+    # Record where THIS engine lives, captured now while we know our own path.
+    # Commands fall back to this when ${CLAUDE_PLUGIN_ROOT}/${KURU_PY} aren't set.
+    engine = Path(__file__).resolve()
+    (kd / "engine").write_text(str(engine) + "\n")
+
     stack = (profile or {}).get("stack") or args.stack
     print(f"Initialized Kurukuru workspace at {kd}"
           + (f" (stack: {stack})" if stack else "")
           + (" (profile loaded)" if profile is not None else ""))
+    print(f"Engine recorded at {kd / 'engine'}.")
+    print(f"Tip: for robust command resolution set  KURU_PY={engine}  in the "
+          "kurukuru plugin's env (Claude Code plugin settings).")
     print("Next: run /kuru:charter (it will use .kuru/profile.json if present), "
           "or edit .kuru/config.json gates.")
 
@@ -433,6 +444,43 @@ def _latest_gate(sid: str) -> dict | None:
     return load_json(p)
 
 
+def _run_one_gate(cmd: str, timeout: int, cwd, logp: Path) -> tuple[int, list[str]]:
+    """Run one gate. Stream its combined output live to stdout AND to `logp` (so a
+    long build can be watched with `tail -f`), enforce a hard timeout via a watchdog
+    (so a silent hang is still killed), and return (exit_code, last_lines)."""
+    tail: deque[str] = deque(maxlen=40)
+    killed = {"v": False}
+    proc = subprocess.Popen(
+        cmd, shell=True, cwd=cwd, text=True, bufsize=1,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+
+    def _kill():
+        killed["v"] = True
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    timer = threading.Timer(timeout, _kill)
+    timer.start()
+    try:
+        with open(logp, "w") as lf:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                lf.write(line)
+                lf.flush()
+                tail.append(line.rstrip("\n"))
+    finally:
+        proc.wait()
+        timer.cancel()
+    if killed["v"]:
+        tail.append(f"TIMEOUT after {timeout}s — process killed")
+        return 124, list(tail)
+    return proc.returncode, list(tail)
+
+
 def cmd_gate(args):
     led = load_ledger()
     s = get_slice(led, args.id)
@@ -443,24 +491,19 @@ def cmd_gate(args):
     if not gates:
         die("no gates configured in .kuru/config.json")
 
+    sdir = kuru_dir() / "slices" / s["id"]
+    root = find_root()
     results = []
     overall = True
-    print(f"Running gates for {s['id']} ...\n")
+    print(f"Running gates for {s['id']} (cwd: {root}) ...\n")
     for name, spec in gates.items():
         cmd = spec["cmd"]
         required = spec.get("required", True)
+        timeout = spec.get("timeout", 1800)
+        logp = sdir / f"gate-{name}.log"
         print(f"  ▶ {name}: {cmd}")
-        try:
-            proc = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                timeout=spec.get("timeout", 1800),
-                cwd=find_root(),
-            )
-            code = proc.returncode
-            tail = (proc.stdout + proc.stderr).strip().splitlines()[-30:]
-        except subprocess.TimeoutExpired:
-            code = 124
-            tail = [f"TIMEOUT after {spec.get('timeout', 1800)}s"]
+        print(f"    live log: {logp}  ·  watch with:  tail -f {logp}")
+        code, tail = _run_one_gate(cmd, timeout, root, logp)
         ok = code == 0
         if required and not ok:
             overall = False
@@ -468,7 +511,8 @@ def cmd_gate(args):
         print(f"    {status} (exit {code})\n")
         results.append({
             "name": name, "cmd": cmd, "required": required,
-            "exit_code": code, "passed": ok, "output_tail": tail,
+            "exit_code": code, "passed": ok,
+            "log": str(logp), "output_tail": tail,
         })
 
     summary = ", ".join(f"{r['name']}={'ok' if r['passed'] else 'x'}" for r in results)

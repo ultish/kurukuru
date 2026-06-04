@@ -92,7 +92,18 @@ Never hand-edit `ledger.json` or `gate-results.json`. Use kuru subcommands.
 
 ## kuru.py command reference
 
-Invoke as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" <cmd>`.
+Invoke as `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>`.
+
+**Finding the engine.** `kuru.py` lives in the installed plugin, not in the target
+repo, so resolve its path in this order:
+1. **`$KURU_PY`** — an absolute path to `kuru.py`. The most reliable option; set it
+   once in the kurukuru plugin's env (Claude Code plugin settings) so every command
+   and the Bash tool see it.
+2. **`${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py`** — works when that env var is present.
+3. **`.kuru/engine`** — a file `kuru init` writes containing the engine's absolute
+   path, captured at init. If the two env vars above aren't set, run
+   `python3 "$(cat .kuru/engine)" <cmd>` from the repo root. (`kuru init --force`
+   refreshes it if the plugin moved.)
 
 | Command | Effect |
 |---|---|
