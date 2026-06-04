@@ -1,0 +1,10 @@
+{
+  "project": "{{PROJECT}}",
+  "_help": "Maven (Java) preset. Gates run in the repo root. Swap the lint goal for the checkstyle/spotbugs/pmd plugin you use. Air-gapped: add -o (offline) once your local repo + internal mirror (settings.xml) are populated.",
+  "gates": {
+    "lint":  { "cmd": "mvn -q -DskipTests checkstyle:check", "required": false, "timeout": 900 },
+    "unit":  { "cmd": "mvn -q test",                          "required": true,  "timeout": 1800 },
+    "build": { "cmd": "mvn -q -DskipTests package",           "required": true,  "timeout": 1800 }
+  },
+  "session_budget_hint": "A slice should fit one agent session: ~1 vertical behavior, < ~10 files touched, tests included. If it won't fit in your head, split it."
+}

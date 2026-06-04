@@ -18,9 +18,20 @@ painful today? What happens if we do nothing? -->
 <!-- How we will KNOW this worked. Numbers where possible (adoption, latency,
 error rate, conversion, cost). "Better UX" is not a metric. -->
 
+## Technical environment
+<!-- This drives .kuru/config.json (the gate commands). Fill in concretely. -->
+- **Language & version:** <!-- e.g. Kotlin 2.0 / JDK 21 target; TypeScript 5.x / Node 20; Go 1.22; Rust 1.78 -->
+- **Build pipeline / tool:** <!-- npm | pnpm | gradle | maven | go | cargo — selects the config preset -->
+- **Gate commands:** <!-- typecheck / lint / test / build as they actually run here; mirror these into config.json -->
+- **Deploy environment:** <!-- Kubernetes | Docker | VM | serverless -->
+- **Deployment artifacts:** <!-- if k8s: Helm charts | raw YAML; the container registry -->
+- **Air-gapped / restricted constraints:** <!-- internal registries (.npmrc / settings.xml / init.gradle / .cargo/config.toml), offline build flags, no internet during build. Be specific — the builder must conform. -->
+- **Reference template / project:** <!-- path or repo to copy build config, registry settings, and layout from, or "none" -->
+
 ## Constraints
-<!-- Tech stack we must use, systems we must integrate with, compliance regimes
-(SOC2 / HIPAA / GDPR / PCI), performance/SLO targets, hard deadlines, budget. -->
+<!-- Non-technical constraints: integrations we must support, compliance regimes
+(SOC2 / HIPAA / GDPR / PCI), performance/SLO targets, hard deadlines, budget.
+(Tech stack lives in Technical environment above.) -->
 
 ## Non-goals
 <!-- What we are explicitly NOT doing. This is as important as the goals. -->

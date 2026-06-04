@@ -10,7 +10,8 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init                         scaffold .kuru/ in the current repo
+  kuru init [--stack T]             scaffold .kuru/ in the current repo
+  kuru set-stack <tool>             rewrite config.json gates from a build-tool preset
   kuru new-slice "<title>" [--epic E]
   kuru ls [--status S]              list slices (table)
   kuru show <id>                    show one slice (paths + state + history)
@@ -215,6 +216,24 @@ def cmd_init(args):
     print(f"Initialized Kurukuru workspace at {kd}"
           + (f" (stack: {args.stack})" if args.stack else ""))
     print("Next: edit .kuru/config.json gates, then run /kuru:charter")
+
+
+def cmd_set_stack(args):
+    """Rewrite .kuru/config.json from a build-tool preset (templates/config.<stack>.json),
+    preserving the project name. Use after `init` to match this repo's pipeline; the
+    charter step calls this, then tailors the gate commands."""
+    kd = kuru_dir()
+    project = kd.parent.name
+    try:
+        led = load_ledger()
+        project = led.get("meta", {}).get("project") or project
+    except Exception:
+        pass
+    content = render(read_template(f"config.{args.stack}.json"), PROJECT=project)
+    (kd / "config.json").write_text(content)
+    print(f"Rewrote {kd / 'config.json'} from config.{args.stack}.json preset.")
+    print("Now tailor the gate commands (task/script names, versions, air-gapped flags),")
+    print("then run `kuru doctor`.")
 
 
 def cmd_new_slice(args):
@@ -504,6 +523,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--stack", default=None,
                    help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. python|go|node)")
     s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser("set-stack"); s.add_argument("stack",
+        help="build-tool preset: node|pnpm|gradle|maven|go|python|cargo (or any config.<stack>.json)")
+    s.set_defaults(fn=cmd_set_stack)
 
     s = sub.add_parser("new-slice"); s.add_argument("title"); s.add_argument("--epic", default=None)
     s.add_argument("--depends-on", dest="depends_on", default=None,

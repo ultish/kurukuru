@@ -52,6 +52,21 @@ grep -q "go test" .kuru/config.json && grep -q "go vet" .kuru/config.json && gre
 newrepo >/dev/null
 expect_fail "unknown --stack errors" "missing template" $KURU init --stack nope
 
+echo "== set-stack: reconfigure gates from a build-tool preset =="
+newrepo >/dev/null
+$KURU init >/dev/null            # default node config
+grep -q "npm run" .kuru/config.json && ok "init default is node/npm" || fail "default not node"
+expect_ok "set-stack gradle" $KURU set-stack gradle
+grep -q "gradlew" .kuru/config.json && ok "config now gradle (./gradlew)" || fail "set-stack gradle didn't apply"
+expect_ok "set-stack maven" $KURU set-stack maven
+grep -q "mvn " .kuru/config.json && ok "config now maven (mvn)" || fail "set-stack maven didn't apply"
+expect_ok "set-stack pnpm"  $KURU set-stack pnpm
+grep -q "pnpm " .kuru/config.json && ok "config now pnpm" || fail "set-stack pnpm didn't apply"
+expect_ok "set-stack cargo" $KURU set-stack cargo
+grep -q "cargo " .kuru/config.json && ok "config now cargo" || fail "set-stack cargo didn't apply"
+expect_ok "doctor healthy after set-stack" $KURU doctor
+expect_fail "set-stack unknown preset errors" "missing template" $KURU set-stack bogus
+
 echo "== SL-2: status + gate enforcement =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null

@@ -1,0 +1,10 @@
+{
+  "project": "{{PROJECT}}",
+  "_help": "Gradle (Kotlin/Java) preset via the wrapper. Gates run in the repo root. Swap task names for what this build uses (ktlintCheck/detekt/spotlessCheck for lint; check covers verification). Air-gapped: add --offline once the Gradle cache + your internal Maven mirror are populated, and point settings.gradle(.kts)/init.gradle at the mirror.",
+  "gates": {
+    "lint":  { "cmd": "./gradlew --console=plain check -x test", "required": false, "timeout": 900 },
+    "unit":  { "cmd": "./gradlew --console=plain test",          "required": true,  "timeout": 1800 },
+    "build": { "cmd": "./gradlew --console=plain assemble",      "required": true,  "timeout": 1800 }
+  },
+  "session_budget_hint": "A slice should fit one agent session: ~1 vertical behavior, < ~10 files touched, tests included. If it won't fit in your head, split it."
+}

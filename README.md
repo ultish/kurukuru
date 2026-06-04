@@ -64,9 +64,11 @@ don't need it for manual `/kuru:*` use.
 ```bash
 # 1. scaffold the workspace
 python3 /path/to/kuru/scripts/kuru.py init                  # creates ./.kuru/
-#    or seed gates for a stack:  init --stack python | go | node
-# 2. edit .kuru/config.json so the gates match this repo (typecheck/lint/test/build)
-#    and fill in .kuru/init.sh (one command to bring up the dev environment)
+#    or seed gates for a build tool: init --stack node|pnpm|gradle|maven|go|python|cargo
+# 2. config.json gets configured for you during /kuru:charter (it interviews you about
+#    language, build pipeline, deploy env, and air-gapped constraints, then sets the gates).
+#    To (re)pick a preset manually:  kuru.py set-stack gradle   then tailor the commands.
+#    Also fill in .kuru/init.sh (one command to bring up the dev environment).
 ```
 
 Then, in Claude Code:

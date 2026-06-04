@@ -1,0 +1,11 @@
+{
+  "project": "{{PROJECT}}",
+  "_help": "Rust + Cargo preset. Gates run in the repo root. Air-gapped: vendor crates (cargo vendor) and point .cargo/config.toml at the vendored/offline source; then builds need no network.",
+  "gates": {
+    "typecheck": { "cmd": "cargo check",                "required": true,  "timeout": 900 },
+    "lint":      { "cmd": "cargo clippy -- -D warnings", "required": false, "timeout": 900 },
+    "unit":      { "cmd": "cargo test",                  "required": true,  "timeout": 1800 },
+    "build":     { "cmd": "cargo build --release",       "required": true,  "timeout": 1800 }
+  },
+  "session_budget_hint": "A slice should fit one agent session: ~1 vertical behavior, < ~10 files touched, tests included. If it won't fit in your head, split it."
+}
