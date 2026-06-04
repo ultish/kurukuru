@@ -15,6 +15,16 @@ reliability/failure modes, performance/SLOs, observability, a11y/i18n,
 migration/rollout), data & interface deltas, dependencies & risks, and an explicit
 **acceptance shape**.
 
-Write it to `.kuru/prd/$ARGUMENTS.md`. When done, show the user the open questions
-the planner surfaced and ask them to resolve any blockers, then point to
-`/kuru:slice $ARGUMENTS`.
+Write it to `.kuru/prd/$ARGUMENTS.md`.
+
+**Gate: resolve open questions before slicing.** When the planner returns, walk the
+user through **every** open question it surfaced — ask them directly (use
+`AskUserQuestion` for discrete choices). Fold each answer back into the PRD (and, if
+it's a charter-level gap, update `.kuru/charter.md` too) and clear it from the Open
+questions list. If a question is genuinely out of scope for now, keep it only with
+the user's explicit agreement, marked `DEFERRED (non-blocking): <why>`.
+
+Do **not** point the user to `/kuru:slice` while any blocking open question is
+unresolved — slicing on top of unanswered questions bakes guesses into frozen
+contracts. Only once Open questions are answered (or explicitly deferred) tell them
+to run `/kuru:slice $ARGUMENTS`.

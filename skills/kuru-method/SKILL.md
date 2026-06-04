@@ -32,6 +32,12 @@ charter -> prd -> slice -> build -> verify -> review -> done
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
 - **review** — code review on the diff. (`/kuru:review`)
 
+**Open questions gate the move from charter → PRD → slice.** Ambiguity is cheapest
+to catch at the charter, and must be resolved at the latest in the PRD — *with the
+user*, folding answers back into the doc. Never start slicing while a blocking open
+question is unresolved; slicing freezes the PRD into contracts, so an unanswered
+question becomes a guess locked inside one.
+
 The first three phases need a human. Once every slice has a frozen contract, the
 build → verify → review → done cycle is mechanical and can be driven
 automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,

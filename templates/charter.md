@@ -26,4 +26,8 @@ error rate, conversion, cost). "Better UX" is not a metric. -->
 <!-- What we are explicitly NOT doing. This is as important as the goals. -->
 
 ## Open questions
-<!-- Anything undecided. Each becomes either a decision or a research slice. -->
+<!-- Anything undecided. RESOLVE these with the user before moving to the PRD/slicing —
+they are a gate, not a footnote. As each is answered, fold the answer into the
+section above and delete it here. Only items the user explicitly agrees are
+non-blocking may remain, marked: `DEFERRED (non-blocking): <why>`. -->
+- _none — or list, each resolved or explicitly DEFERRED before slicing_

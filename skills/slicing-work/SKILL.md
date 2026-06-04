@@ -11,6 +11,15 @@ whole harness: too big and the agent runs out of context and fakes done; too
 small or horizontal and it can't be independently verified. Every slice must
 satisfy **two opposing constraints at once**.
 
+## Precondition: no open questions
+
+Before you cut a single slice, confirm the charter's and the PRD's **Open
+questions** are resolved (answered inline, or explicitly `DEFERRED (non-blocking)`
+with the user's agreement). If any blocking question remains, **stop and resolve it
+with the user first**, then update the charter/PRD. Slicing freezes the PRD into
+contracts; an unanswered question becomes a guess locked inside one. Resolving it
+later means re-`draft`ing slices — the drift this harness exists to prevent.
+
 ## Constraint 1 — small enough (fits one session)
 - One slice ≈ **one observable behavior**, a handful of files, with its tests.
   Rule of thumb: if you cannot hold the whole change *and* its tests in your head

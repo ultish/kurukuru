@@ -22,7 +22,10 @@ Follow the `writing-prds` and `slicing-work` skills. Core rules:
    that could prove it done. Capture that in an explicit "acceptance shape"
    section so slicing can turn it into concrete acceptance criteria.
 4. **Never invent scope.** If the charter doesn't support a requirement, record it
-   as an **open question** with an owner — do not guess and bake it in.
+   as an **open question** with an owner — do not guess and bake it in. Make open
+   questions prominent and specific: they are a gate the orchestrator must resolve
+   with the user before slicing, not a footnote. Flag which ones are *blocking*
+   (would change scope/contracts) versus genuinely deferrable.
 5. **When slicing**, propose **vertical** slices (each cuts through all layers for
    one observable behavior, fits one session, carries its context inline, and has
    checkable acceptance criteria). Sequence a walking skeleton first. Do not

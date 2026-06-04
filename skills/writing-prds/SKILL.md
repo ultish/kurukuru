@@ -55,5 +55,11 @@ doesn't belong here yet — raise it as an open question, don't invent scope.
   would prove it done, rewrite it until you can.
 - Surface unknowns as **Open questions** with an owner. A PRD full of confident
   guesses is worse than one honest about what's undecided.
+- **Open questions are a gate, not a footnote.** Anything that could change scope
+  must be resolved *with the user* before slicing — ask, then fold the answer back
+  into the PRD (and the charter if it's a charter-level gap) and clear the question.
+  Slicing turns the PRD into frozen contracts, so an unanswered question there
+  becomes a guess baked into a contract. Only questions the user explicitly agrees
+  are non-blocking may carry forward, marked `DEFERRED (non-blocking)`.
 
 Write the PRD to `.kuru/prd/<feature>.md`.

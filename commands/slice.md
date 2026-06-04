@@ -5,10 +5,20 @@ argument-hint: "<feature-name>"
 
 Use the `slicing-work` skill.
 
-Read `.kuru/prd/$ARGUMENTS.md`. Propose a set of **vertical** slices — each one
-observable behavior, session-sized, carrying its context inline, with checkable
-acceptance criteria, sequenced as a walking skeleton first. Show the proposed
-boundaries and acceptance criteria to the user and refine before materializing.
+**First, gate on open questions.** Read both `.kuru/charter.md` and
+`.kuru/prd/$ARGUMENTS.md`, including their **Open questions** sections. If any
+question is still unresolved (not answered inline and not explicitly marked
+`DEFERRED (non-blocking)`), **STOP — do not slice.** Surface each one to the user,
+get the answer (use `AskUserQuestion` for discrete choices), update the charter/PRD
+to fold the answers in and clear the question, and only then continue. Slicing on
+top of unresolved questions freezes guesses into contracts — exactly what this
+harness exists to prevent.
+
+Once Open questions are resolved, read `.kuru/prd/$ARGUMENTS.md` and propose a set
+of **vertical** slices — each one observable behavior, session-sized, carrying its
+context inline, with checkable acceptance criteria, sequenced as a walking skeleton
+first. Show the proposed boundaries and acceptance criteria to the user and refine
+before materializing.
 
 For each agreed slice:
 1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" new-slice "<title>" --epic $ARGUMENTS`
