@@ -48,7 +48,8 @@ Repeat until a stop condition fires:
    | `ready` / `in_progress` | dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build`) on exactly that slice. |
    | `rejected` | dispatch a **fresh `kuru-builder`**, passing the verifier's rejection note so it fixes the named failures. |
    | `built` | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify`). |
-   | `verified` | run code review (as `/kuru:review`): `/code-review high` on the slice's diff. Clean → `set-status <id> reviewed --by reviewer` then `set-status <id> done`. Real problems found → treat as a send-back (see retry rule) and `set-status <id> in_progress --by reviewer --note "<what to fix>"`. |
+   | `verified` | run code review (as `/kuru:review`): `/code-review high` on the slice's diff. Clean → `set-status <id> reviewed --by reviewer` then `set-status <id> done`. Real problems found → treat as a send-back (see retry rule) and `set-status <id> rejected --by reviewer --note "<what to fix>"` (the engine allows `verified → rejected`, **not** `verified → in_progress`; from `rejected` the slice flows back to the builder and the rejection is counted toward the retry cap). |
+   | `reviewed` | reviewed in a prior session but not shipped → `set-status <id> done`. |
 
 5. After each transition, briefly note progress, then loop.
 

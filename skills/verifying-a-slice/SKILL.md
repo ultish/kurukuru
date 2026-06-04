@@ -30,11 +30,14 @@ verification is adversarial. That separation is the point.
    - **automated** — run the named test; capture the pass line and name. If the
      builder claims a test exists, confirm it actually exercises the behavior, not
      a tautology.
-   - **observed / manual** — **drive the running application** (use the project's
-     run/verify skills, or Playwright/Puppeteer MCP if available): make the real
-     request, click the real button, screenshot the real states (empty, loading,
-     error, success), read the real logs/audit entries. Inspect the database/state
-     where the AC is about persistence.
+   - **observed / manual** — **drive the running application**. `Bash` covers most
+     of it: `curl`/`http` the real endpoint, `kubectl`/`docker` against a deployed
+     service, `psql`/`redis-cli` to read persisted state, `logs` for audit entries.
+     Make the real request, read the real state, capture the actual output. For UI
+     states that truly need a screenshot (empty, loading, error, success), use a
+     browser-automation MCP **if your tools include one**; otherwise verify via the
+     HTTP/API layer and cite that. Inspect the database/state where the AC is about
+     persistence.
    - For NFRs (authz, audit, error handling): actively try to break them — call as
      the wrong user, trigger the failure path — and confirm the specified
      behavior.

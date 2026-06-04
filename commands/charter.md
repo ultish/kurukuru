@@ -28,12 +28,9 @@ Interview for, and do not assume:
 
 Ask follow-ups where answers are vague — a charter full of guesses is worthless.
 
-**Technical environment — ask this as ONE group toward the END of the discussion.**
+**Technical environment — cover this as ONE group toward the END of the discussion.**
 It's a separate topic from the problem/why-now above: it's *how* we build and
-deploy, and it drives `.kuru/config.json`. First, **if `.kuru/profile.json` exists**
-(the user ran `kuru init --profile <file>`), it pre-answers this whole group — read
-it, confirm the values with the user instead of re-asking, and use its
-`config`/`stack` for the gates. Otherwise ask it as one `AskUserQuestion` batch:
+deploy, and it drives `.kuru/config.json`. The fields to establish:
 - **Language & version** (e.g. TypeScript/Node 20, Kotlin 2.0 / JDK 21, Go 1.22,
   Rust). Pin versions where they matter (JDK target, Node major).
 - **Build pipeline / tool** (npm, pnpm, gradle, maven, cargo, go) — selects the gate
@@ -50,11 +47,24 @@ it, confirm the values with the user instead of re-asking, and use its
   exists, read its build config and mirror its gate commands, registry settings, and
   layout instead of inventing them.
 
-Write/update `.kuru/charter.md` (use its template sections, including **Technical
-environment**), folding in every answer.
+**If `.kuru/profile.json` exists** (the user ran `kuru init --profile <file>`),
+treat it as **guidance, not gospel** — it's a head start on the fields above, not a
+finished answer:
+1. Read it and **summarize back to the user** what it implies for each field above
+   (language/version, build tool, deploy env, air-gap endpoints, reference project,
+   and any `config` gate commands it suggests).
+2. **Hunt for gaps** — fields the profile leaves blank, stale, or ambiguous for
+   *this* project — and ask the user only those (use `AskUserQuestion`). Confirm the
+   pre-filled values rather than assuming them.
+Otherwise (no profile), ask the whole group as one `AskUserQuestion` batch.
 
-**Then configure the gates for this stack.** Translate the build pipeline into
-`.kuru/config.json`:
+Write/update `.kuru/charter.md` (use its template sections, including **Technical
+environment**), folding in every answer — including the air-gap endpoints and any
+environment detail that doesn't belong in the gates. The charter is where the
+*rest* of the profile lives.
+
+**Then write the gates for this stack into `.kuru/config.json`.** This is where the
+authoritative gate config gets set — the profile only informed it:
 1. Seed it from the matching preset:
    `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack <tool>` — one of
    `node` `pnpm` `gradle` `maven` `go` `python` `cargo` (rewrites `config.json` from
@@ -62,7 +72,8 @@ environment**), folding in every answer.
 2. Then **tailor** the gate commands to this repo: exact task/script names, the
    JDK/Node version, monorepo subpaths, and any air-gapped flags (`--offline` for
    gradle, `-o` for maven, `--offline`/`.npmrc` for pnpm, vendored crates for cargo).
-   If the user named a reference project, copy its commands.
+   If the profile carried a `config` block, use its gate commands as the starting
+   point here. If the user named a reference project, copy its commands.
 3. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 If the build pipeline isn't a preset, write the four gates by hand to match how this
 repo actually typechecks / lints / tests / builds.

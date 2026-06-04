@@ -118,15 +118,19 @@ python3 /path/to/kuru/scripts/kuru.py init --profile ~/.kuru/profiles/gradle-kub
 A profile is plain JSON you keep **outside the plugin** (see
 [`templates/profile.example.json`](templates/profile.example.json)):
 
-- `stack` — a gate preset (`node|pnpm|gradle|maven|go|python|cargo`), or
-- `config` — a full `config.json` used verbatim (e.g. gradle `--offline` against an
-  internal mirror), and
+- `stack` — a gate preset (`node|pnpm|gradle|maven|go|python|cargo`) used to seed
+  the initial `config.json` at `init`,
+- `config` — suggested gate commands (e.g. gradle `--offline` against an internal
+  mirror) that `/kuru:charter` uses as a **starting point**, and
 - `environment` — language/version, deploy target, and **internal registry
-  endpoints**, which pre-fill the charter's Technical environment so you don't
+  endpoints** that pre-fill the charter's Technical environment so you don't
   re-type them each time.
 
-`init` writes the gates and stashes the profile at `.kuru/profile.json`;
-`/kuru:charter` reads it and confirms rather than re-interviewing. Internal
+The profile is **guidance, not gospel**. `init` seeds a starting `config.json` from
+`stack` (or the node default) and stashes the profile at `.kuru/profile.json`. Then
+`/kuru:charter` reads it, **summarizes it back to you, hunts for gaps to confirm**,
+writes the authoritative `config.json`, and folds the rest (endpoints, deploy
+target) into the charter — rather than applying any of it verbatim. Internal
 endpoints you'd rather not commit can be left out of the profile and supplied at the
 end of the charter (which lets you skip them for later).
 
@@ -196,7 +200,7 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 |---|---|---|
 | `--repo` | `.` | Target repo containing `.kuru/`. |
 | `--plugin-dir` | dir of `runner.py` | Where the kuru plugin lives. |
-| `--max-retries` | `2` | Per-slice verify-rejection cap before it `blocked`s and stops. |
+| `--max-retries` | `2` | Per-slice rejection cap (verifier or review) before it `blocked`s and stops. |
 | `--max-iters` | `100` | Global safety cap on loop iterations. |
 | `--permission-mode` | `bypassPermissions` | Passed to `claude` per step. |
 | `--settings` / `--allowed-tools` | — | Tighten permissions instead of bypassing. |
@@ -207,10 +211,13 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 
 ```
 draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
-                      ^                       |
-                      +------- rejected <-----+
+                      ^                       |             |
+                      +------- rejected <-----+-------------+   (code review can reject too)
 any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
 ```
+
+A code review that finds real problems rejects the slice (`verified -> rejected`),
+which routes it back to the builder — there is no `verified -> in_progress`.
 
 ## Files
 

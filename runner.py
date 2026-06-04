@@ -172,11 +172,12 @@ class Runner:
 
             print(f"[{i}] {sid} [{status}] -> {action}  ({nxt['title']})")
 
-            # retry cap on the build<->verify reject cycle
+            # retry cap on the reject cycle (a slice can be rejected by the verifier
+            # OR by code review — both land in `rejected` and count here).
             if status == "rejected":
                 info = self.kuru_json("show", sid, "--json")
                 if info.get("rejections", 0) >= self.max_retries:
-                    self.block(sid, f"exceeded {self.max_retries} verify rejections")
+                    self.block(sid, f"exceeded {self.max_retries} verify/review rejections")
                     print("   Stopping for a human.")
                     return 1
 
@@ -222,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the kuru plugin directory (default: the directory holding this script). "
                         "Set this if you move runner.py out of the plugin repo.")
     p.add_argument("--max-retries", type=int, default=2,
-                   help="per-slice verify-rejection cap before blocking (default 2)")
+                   help="per-slice rejection cap (verifier OR review) before blocking (default 2)")
     p.add_argument("--max-iters", type=int, default=100,
                    help="global safety cap on loop iterations (default 100)")
     p.add_argument("--permission-mode", default="bypassPermissions",

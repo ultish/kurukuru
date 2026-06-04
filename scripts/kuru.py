@@ -156,6 +156,7 @@ STATUS_ACTION = {
     "in_progress": "build",
     "ready": "build",
     "verified": "review",
+    "reviewed": "review",    # reviewed but not shipped -> /kuru:review marks it done
     "draft": "slice",        # needs a human to slice/contract it
 }
 
@@ -176,7 +177,7 @@ def unmet_deps(led: dict, s: dict) -> list[str]:
 def pick_next(led: dict) -> dict | None:
     """The next actionable slice in pipeline order, skipping `ready` slices whose
     dependencies aren't `done` yet."""
-    order = ["verifying", "built", "rejected", "in_progress", "ready", "verified", "draft"]
+    order = ["verifying", "built", "rejected", "in_progress", "ready", "verified", "reviewed", "draft"]
     for st in order:
         cands = [s for s in led["slices"] if s["status"] == st]
         if st == "ready":
@@ -205,15 +206,14 @@ def cmd_init(args):
         except Exception as e:
             die(f"could not read --profile {args.profile}: {e}")
 
-    # Resolve config.json: explicit profile.config > profile.stack/--stack preset > node default.
-    if profile and isinstance(profile.get("config"), dict):
-        cfg = dict(profile["config"])
-        cfg.setdefault("project", root.name)
-        config_text = render(json.dumps(cfg, indent=2) + "\n", PROJECT=root.name)
-    else:
-        stack = (profile or {}).get("stack") or args.stack
-        config_src = f"config.{stack}.json" if stack else "config.json"
-        config_text = render(read_template(config_src), PROJECT=root.name)
+    # Seed config.json from a stack preset (profile.stack or --stack), else the node
+    # default. A profile's `config`/`environment` are deliberately NOT applied here:
+    # they are *guidance* for /kuru:charter, which summarizes them back to the user,
+    # fills any gaps, and writes the authoritative config.json + charter. init only
+    # lays down a sane starting config so `doctor` passes before the charter runs.
+    stack = (profile or {}).get("stack") or args.stack
+    config_src = f"config.{stack}.json" if stack else "config.json"
+    config_text = render(read_template(config_src), PROJECT=root.name)
 
     seed = {
         "config.json": config_text,
@@ -248,8 +248,9 @@ def cmd_init(args):
     print(f"Engine recorded at {kd / 'engine'}.")
     print(f"Tip: for robust command resolution set  KURU_PY={engine}  in the "
           "kurukuru plugin's env (Claude Code plugin settings).")
-    print("Next: run /kuru:charter (it will use .kuru/profile.json if present), "
-          "or edit .kuru/config.json gates.")
+    print("Next: run /kuru:charter (it reads .kuru/profile.json as guidance if "
+          "present, confirms it with you, then writes config.json), or edit "
+          ".kuru/config.json gates by hand.")
 
 
 def cmd_set_stack(args):
@@ -347,10 +348,11 @@ def cmd_next(args):
     label = {
         "verifying": "needs a verifier",
         "built": "ready to verify",
-        "rejected": "verifier rejected — back to builder",
+        "rejected": "rejected — back to builder",
         "in_progress": "build in progress",
         "ready": "ready to build",
         "verified": "ready for code review",
+        "reviewed": "reviewed — mark done once shipped",
         "draft": "needs a contract before it can be built",
     }
     s = pick_next(led)

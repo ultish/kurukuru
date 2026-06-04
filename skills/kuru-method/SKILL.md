@@ -49,10 +49,14 @@ runs charter/PRD/slicing for you.
 
 ```
 draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
-                      ^                       |
-                      +------- rejected <-----+
+                      ^                       |             |
+                      +------- rejected <-----+-------------+   (review can reject too)
 any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
 ```
+
+Both the verifier (`verifying -> rejected`) and code review (`verified ->
+rejected`) send a slice back to the builder. There is no `verified -> in_progress`;
+a failed review rejects, and `rejected -> in_progress` resumes the build.
 
 Three rules are enforced **in code** — you cannot talk your way past them:
 1. Illegal transitions are refused.

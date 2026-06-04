@@ -68,18 +68,26 @@ grep -q "cargo " .kuru/config.json && ok "config now cargo" || fail "set-stack c
 expect_ok "doctor healthy after set-stack" $KURU doctor
 expect_fail "set-stack unknown preset errors" "missing template" $KURU set-stack bogus
 
-echo "== init --profile: reusable environment profile =="
+echo "== init --profile: reusable environment profile (guidance, not gospel) =="
 newrepo >/dev/null
 prof="$(mktemp)"
 printf '{"stack":"gradle","config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}},"environment":{"language":"Kotlin/JDK21"}}\n' > "$prof"
-expect_ok "init --profile (explicit config)" $KURU init --profile "$prof"
-grep -q "gradlew test" .kuru/config.json && ok "profile config became .kuru/config.json" || fail "profile config not applied"
-[ -f .kuru/profile.json ] && grep -q "Kotlin/JDK21" .kuru/profile.json && ok "profile saved to .kuru/profile.json" || fail "profile.json missing"
-python3 -c "import json;assert json.load(open('.kuru/config.json'))['project']" && ok "profile config got a project name" || fail "no project in config"
+expect_ok "init --profile (config is guidance only)" $KURU init --profile "$prof"
+# init seeds config.json from the profile's STACK preset (gradle), NOT from its
+# `config` block verbatim — that block is guidance for /kuru:charter to apply later.
+grep -q "gradlew" .kuru/config.json && ok "config seeded from profile stack preset" || fail "stack preset not seeded"
+grep -q "gradlew test" .kuru/config.json && fail "profile config applied verbatim (should be guidance only)" || ok "profile config NOT applied verbatim (charter's job)"
+[ -f .kuru/profile.json ] && grep -q "Kotlin/JDK21" .kuru/profile.json && ok "profile stashed to .kuru/profile.json for charter" || fail "profile.json missing"
+python3 -c "import json;assert json.load(open('.kuru/config.json'))['project']" && ok "seeded config got a project name" || fail "no project in config"
 newrepo >/dev/null
 printf '{"stack":"pnpm"}\n' > "$prof"
 expect_ok "init --profile (stack only)" $KURU init --profile "$prof"
 grep -q "pnpm " .kuru/config.json && ok "stack-only profile picks the preset" || fail "stack-only profile failed"
+# profile with ONLY a config block (no stack) falls back to the node default seed.
+newrepo >/dev/null
+printf '{"config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}}}\n' > "$prof"
+expect_ok "init --profile (config only, no stack)" $KURU init --profile "$prof"
+grep -q "npm " .kuru/config.json && ok "config-only profile falls back to node default seed" || fail "config-only profile didn't fall back to node"
 
 echo "== SL-2: status + gate enforcement =="
 newrepo >/dev/null
@@ -109,6 +117,33 @@ $KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress 
 $KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by builder >/dev/null
 $KURU gate SL-0001 >/dev/null 2>&1
 expect_fail "builder cannot set verified" "builder may not" $KURU set-status SL-0001 verified --by builder
+
+echo "== review: a failed code review rejects (verified->rejected), never ->in_progress =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verified --by verifier >/dev/null
+# the broken path the commands used to describe must stay illegal
+expect_fail "verified->in_progress refused (review must reject)" "illegal transition" $KURU set-status SL-0001 in_progress --by reviewer
+# the correct send-back: reviewer rejects
+expect_ok "verified->rejected by reviewer" $KURU set-status SL-0001 rejected --by reviewer --note "fix X"
+# a reviewer rejection is counted toward the retry cap (show --json rejections)
+$KURU show SL-0001 --json | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['rejections']>=1 else 1)" \
+  && ok "reviewer rejection counts toward retry cap" || fail "rejection not counted"
+# from rejected, next dispatches a build
+$KURU next --json | grep -q '"next_action": "build"' && ok "rejected -> next says build" || fail "rejected next wrong"
+
+echo "== reviewed: a reviewed-but-unshipped slice is visible to next (action=review->done) =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verified --by verifier >/dev/null
+$KURU set-status SL-0001 reviewed --by reviewer >/dev/null
+nx="$($KURU next --json)"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "review"' \
+  && ok "reviewed slice surfaces via next (action review)" || fail "reviewed not surfaced: $nx"
 
 echo "== deps: --json + dependency chains =="
 newrepo >/dev/null

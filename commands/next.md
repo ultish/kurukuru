@@ -12,6 +12,7 @@ status, recommend (and offer to start) the matching command:
 - `in_progress` / `rejected` → `/kuru:build <id>` (resume).
 - `built` → `/kuru:verify <id>` (with an independent verifier).
 - `verified` → `/kuru:review <id>`.
+- `reviewed` → `/kuru:review <id>` (marks it `done` once shipped).
 
 If nothing is actionable, say whether everything is `done`/`blocked` and suggest
 `/kuru:slice` or unblocking.

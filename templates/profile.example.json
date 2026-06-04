@@ -1,8 +1,8 @@
 {
-  "_help": "Reusable environment profile for `kuru init --profile <thisfile>`. Copy it OUTSIDE the plugin (e.g. ~/.kuru/profiles/gradle-kube.json) and edit for your org. 'stack' picks a gate preset; 'config' (if present) is used verbatim as .kuru/config.json (overrides 'stack'); 'environment' pre-answers the charter's Technical environment so you don't re-type it each project. Nothing here is secret-by-design — internal URLs are fine, but gitignore the profile if you prefer.",
+  "_help": "Reusable environment profile for `kuru init --profile <thisfile>`. Copy it OUTSIDE the plugin (e.g. ~/.kuru/profiles/gradle-kube.json) and edit for your org. The profile is GUIDANCE, not gospel: 'stack' seeds the initial gate preset at init; 'config' and 'environment' are read by /kuru:charter, which summarizes them back to you, fills any gaps, then writes the authoritative .kuru/config.json and folds the rest into the charter. Nothing here is secret-by-design — internal URLs are fine, but gitignore the profile if you prefer.",
   "stack": "gradle",
   "config": {
-    "_help": "OPTIONAL. Omit to just use the 'stack' preset. If present, this becomes .kuru/config.json verbatim (project name is filled in for you). Air-gapped example: gradle --offline against a populated cache.",
+    "_help": "OPTIONAL. Omit to just use the 'stack' preset. If present, /kuru:charter uses these gate commands as the STARTING POINT when it writes config.json (it confirms/tailors them with you first — they are not applied verbatim). Air-gapped example: gradle --offline against a populated cache.",
     "gates": {
       "lint":  { "cmd": "./gradlew --offline --console=plain check -x test", "required": false, "timeout": 900 },
       "unit":  { "cmd": "./gradlew --offline --console=plain test",          "required": true,  "timeout": 1800 },

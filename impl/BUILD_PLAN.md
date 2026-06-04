@@ -6,6 +6,12 @@
 > in fenced blocks, reproduce them faithfully; where a *spec/outline* is given,
 > write the file to satisfy every listed requirement. One file already exists and
 > is **load-bearing reference**: `scripts/kuru.py` — use it as-is.
+>
+> **NOTE (this doc is now legacy).** The plugin was built from this spec and has
+> since evolved. Current behavior for the things that changed — extra commands
+> (`loop`, `status`, `next`), the external `runner.py`, environment profiles,
+> dependency chains, and the corrected review send-back — is captured in **§9
+> Addendum** at the end. Where this spec and §9 disagree, §9 and the code win.
 
 ---
 
@@ -528,3 +534,64 @@ Files: `README.md` (§6.1). Acceptance:
   frontmatter, `${CLAUDE_PLUGIN_ROOT}`), consult the official Claude Code plugin
   docs rather than guessing.
 ```
+
+---
+
+## 9. Addendum — changes since the original spec
+
+This section records where the shipped plugin departs from §1–§8. The code and
+`scripts/selftest.sh` are authoritative; this is the map.
+
+### 9.1 Review send-back is `verified → rejected` (not `→ in_progress`)
+The engine has **no** `verified → in_progress` transition. A code review that finds
+real problems sends the slice back by **rejecting** it:
+`kuru set-status <id> rejected --by reviewer --note "<what to fix>"`. From
+`rejected` the slice resumes via `/kuru:build`. This means a reviewer rejection is
+counted toward the retry cap exactly like a verifier rejection (`show --json`
+`rejections`). The state diagram in §1 should be read as: **both** `verifying →
+rejected` and `verified → rejected` route back to the builder. (`/kuru:review`,
+`/kuru:loop`, and the diagrams in README + `kuru-method` reflect this.)
+
+### 9.2 `reviewed` is actionable to `next`
+A slice left in `reviewed` (reviewed but not yet shipped) is surfaced by
+`kuru next` with `next_action: review`; `/kuru:review` on a `reviewed` target just
+marks it `done`. This keeps a reviewed-but-unshipped slice from being invisible to
+the loop/runner.
+
+### 9.3 Environment profiles are guidance, not gospel
+`kuru init --profile <file>` no longer writes the profile's `config` block into
+`config.json` verbatim. `init` seeds `config.json` from the profile's `stack`
+preset (or the node default) and **stashes the profile at `.kuru/profile.json`**.
+`/kuru:charter` then reads it as guidance: summarizes it back to the user, hunts
+for gaps to confirm, writes the authoritative `config.json`, and folds the rest
+(deploy target, air-gap endpoints) into the charter. See
+`templates/profile.example.json`.
+
+### 9.4 Components added beyond §2–§3
+- **Commands:** `loop` (in-session autonomous build→verify→review→done driver),
+  `status` (dashboard), `next` (what-to-do-next) — 12 commands total, not 9.
+- **`runner.py`** (repo root, **not** part of the plugin): external headless driver
+  that reads `kuru next --json` and launches a fresh `claude -p` per step. It only
+  ever writes `blocked` (a safety stop); all other transitions go through the
+  `claude -p` session so the engine's gate/role rules still gate everything.
+- **Dependency chains:** `new-slice --depends-on …`; engine refuses
+  `ready → in_progress` until deps are `done`; `next` skips dep-blocked slices;
+  `doctor` flags unknown deps.
+- **Stack presets + `set-stack`:** `templates/config.<stack>.json` for
+  `node|pnpm|gradle|maven|go|python|cargo`; `init --stack` and `set-stack`.
+- **`templates/init.sh`** stub dropped into `.kuru/` by `init`.
+- **Machine-readable state:** `ls|show|next --json`.
+- **Engine path resolution:** `${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}`
+  with a `.kuru/engine` fallback file written at `init`.
+
+### 9.5 Verifier toolset is intentionally read-only (+ optional Playwright)
+`kuru-verifier` uses `tools: Read, Grep, Glob, Bash, mcp__playwright` — no
+`Write`/`Edit`, so it judges but never fixes source. `Bash` is the primary
+verification driver (curl/kubectl/psql/logs). `mcp__playwright` is listed so the
+verifier can take browser screenshots **when** a Playwright MCP server is
+connected (registered as `playwright`); when it isn't, the entry resolves to
+nothing and the verifier falls back to HTTP/API evidence — i.e. "use it if
+available." kuru does **not** bundle the server (keeps the plugin stdlib-only and
+air-gap friendly); the user supplies it via their own `.mcp.json`. Omitting
+`tools` entirely would inherit everything (including edit tools) and break the
+"judge, don't fix" guarantee, so the explicit allowlist stays.
