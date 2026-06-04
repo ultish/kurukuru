@@ -25,7 +25,7 @@ error rate, conversion, cost). "Better UX" is not a metric. -->
 - **Gate commands:** <!-- typecheck / lint / test / build as they actually run here; mirror these into config.json -->
 - **Deploy environment:** <!-- Kubernetes | Docker | VM | serverless -->
 - **Deployment artifacts:** <!-- if k8s: Helm charts | raw YAML; the container registry -->
-- **Air-gapped / restricted constraints:** <!-- internal registries (.npmrc / settings.xml / init.gradle / .cargo/config.toml), offline build flags, no internet during build. Be specific — the builder must conform. -->
+- **Air-gapped / restricted constraints:** <!-- internal registries (.npmrc / settings.xml / init.gradle / .cargo/config.toml), offline build flags, no internet during build. Be specific — the builder must conform. Endpoints may be left as "TBD — to provide" if the user is supplying them later. -->
 - **Reference template / project:** <!-- path or repo to copy build config, registry settings, and layout from, or "none" -->
 
 ## Constraints

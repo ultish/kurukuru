@@ -26,51 +26,46 @@ Interview for, and do not assume:
 - Non-goals.
 - Open questions.
 
-**Technical environment (this drives `.kuru/config.json`).** First, **if
-`.kuru/profile.json` exists** (the user ran `kuru init --profile <file>`), read it —
-it pre-answers most of this. Confirm the values with the user instead of re-asking,
-and use its `config`/`stack` for the gates and its `environment` block to fill the
-charter. Otherwise interview for:
+Ask follow-ups where answers are vague — a charter full of guesses is worthless.
+
+**Technical environment — ask this as ONE group toward the END of the discussion.**
+It's a separate topic from the problem/why-now above: it's *how* we build and
+deploy, and it drives `.kuru/config.json`. First, **if `.kuru/profile.json` exists**
+(the user ran `kuru init --profile <file>`), it pre-answers this whole group — read
+it, confirm the values with the user instead of re-asking, and use its
+`config`/`stack` for the gates. Otherwise ask it as one `AskUserQuestion` batch:
 - **Language & version** (e.g. TypeScript/Node 20, Kotlin 2.0 / JDK 21, Go 1.22,
-  Java 21, Rust). Pin versions where they matter (JDK target, Node major).
-- **Build pipeline / tool** (npm, pnpm, gradle, maven, cargo, go) — this selects
-  the config preset.
+  Rust). Pin versions where they matter (JDK target, Node major).
+- **Build pipeline / tool** (npm, pnpm, gradle, maven, cargo, go) — selects the gate
+  preset.
 - **Deploy environment** (Kubernetes, Docker, VM, serverless) and, if Kubernetes,
   **deployment artifacts** (Helm charts, raw k8s YAML, the container registry).
-- **Air-gapped / restricted?** — whether there's internet during build and whether
-  internal package registries are in play. Keep it high-level here; the **exact
-  endpoint URLs are asked last and are skippable** (see below).
-- **Existing template or reference project** to copy conventions from (a path or
-  repo). If one exists, read its build config and mirror its gate commands,
-  registry settings, and project layout instead of inventing them.
+- **Air-gapped / restricted?** — and, if so, the concrete **internal endpoints**:
+  package registry/mirror URLs (`.npmrc` registry, Maven/Gradle mirror, `.cargo`
+  source), the container registry, and any offline flags. **These endpoints are the
+  one skippable part:** if the user wants to provide them later, record them in the
+  charter as `TBD — to provide` and don't block. Everything else here should be
+  answered.
+- **Existing template or reference project** to copy conventions from. If one
+  exists, read its build config and mirror its gate commands, registry settings, and
+  layout instead of inventing them.
 
-Ask follow-ups where answers are vague — a charter full of guesses is worthless.
-When you have enough, write/update `.kuru/charter.md` (use its template sections,
-including **Technical environment**).
+Write/update `.kuru/charter.md` (use its template sections, including **Technical
+environment**), folding in every answer.
 
 **Then configure the gates for this stack.** Translate the build pipeline into
 `.kuru/config.json`:
 1. Seed it from the matching preset:
-   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" set-stack <tool>` where `<tool>`
-   is one of `node` `pnpm` `gradle` `maven` `go` `python` `cargo` (this rewrites
-   `.kuru/config.json` from `templates/config.<tool>.json`).
-2. Then **tailor** the gate commands to this repo's reality: exact task/script
-   names, the JDK/Node version, monorepo subpaths, and any air-gapped flags
-   (`--offline` for gradle, `-o` for maven, `--offline`/`.npmrc` for pnpm, vendored
-   crates for cargo). If the user pointed at a reference project, copy its commands.
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" set-stack <tool>` — one of
+   `node` `pnpm` `gradle` `maven` `go` `python` `cargo` (rewrites `config.json` from
+   `templates/config.<tool>.json`).
+2. Then **tailor** the gate commands to this repo: exact task/script names, the
+   JDK/Node version, monorepo subpaths, and any air-gapped flags (`--offline` for
+   gradle, `-o` for maven, `--offline`/`.npmrc` for pnpm, vendored crates for cargo).
+   If the user named a reference project, copy its commands.
 3. Confirm with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py" doctor`.
-If the build pipeline isn't one of the presets, write the four gates by hand to
-match how this repo actually typechecks / lints / tests / builds.
-
-**Air-gapped endpoints — ask LAST, and let the user skip.** If the environment is
-air-gapped/restricted, then toward the *end* of the discussion ask (via
-`AskUserQuestion`) for the concrete internal endpoints: package registry/mirror
-URLs (`.npmrc` registry, Maven/Gradle mirror, `.cargo` source), the container
-registry, and any required offline flags. **The user may skip these for later** —
-if they do, record them in the charter's Technical environment as
-`TBD — to provide` and do **not** block on them. If they're given, save them in the
-charter (and they inform `.kuru/init.sh` and the builder). This is the only part of
-the tech environment allowed to remain unresolved into slicing.
+If the build pipeline isn't a preset, write the four gates by hand to match how this
+repo actually typechecks / lints / tests / builds.
 
 **Resolve open questions here — don't punt them downstream.** The charter is the
 cheapest place to catch ambiguity. Before you finish, review the **Open questions**
