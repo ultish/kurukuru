@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-07
+
+### Added
+- **`/kuru:init` slash command.** Exposes `kuru init` as a first-class `/kuru:init`
+  command with support for `--stack`, `--profile`, and `--force` flags. Guards
+  against silent overwrites of an existing `.kuru/` workspace and points to next
+  steps after scaffolding.
+
+### Changed
+- **README: clarified `KURU_PY` setup.** `CLAUDE_PLUGIN_ROOT` is set automatically
+  by Claude Code when the plugin loads, so no explicit configuration is needed for
+  most users. The `~/.claude/settings.json` `env.KURU_PY` override is now framed as
+  an escape hatch for unusual setups (symlinked plugin, etc.), with a note that
+  Claude Code has no plugin-scoped env mechanism.
+
 ## [0.1.1] - 2026-06-04
 
 ### Fixed
@@ -87,6 +102,7 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.1.1...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v0.1.3...HEAD
+[0.1.3]: https://example.com/kurukuru/compare/v0.1.1...v0.1.3
 [0.1.1]: https://example.com/kurukuru/compare/v0.1.0...v0.1.1
 [0.1.0]: https://example.com/kurukuru/releases/tag/v0.1.0
