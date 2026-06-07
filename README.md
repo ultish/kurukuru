@@ -53,13 +53,28 @@ pip installs). Add the plugin directory to Claude Code (local plugin or via a
 marketplace entry); Claude Code auto-discovers `commands/`, `agents/`, and
 `skills/`. Commands appear as `/kuru:*`.
 
-**Engine path (recommended).** Commands call the engine as
-`${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}`. For the most reliable
-resolution — the plugin lives on your machine, separate from the repo you're
-working in — set **`KURU_PY`** to the absolute path of `scripts/kuru.py` in the
-kurukuru plugin's env (Claude Code plugin settings). It overrides everything. If
-you skip this, commands fall back to `${CLAUDE_PLUGIN_ROOT}` and then to the path
-`kuru init` records in `.kuru/engine`.
+**Engine path.** Commands call the engine as
+`${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}`. Claude Code sets
+`CLAUDE_PLUGIN_ROOT` automatically when the plugin loads, so **no configuration is
+needed for most users** — the fallback resolves to the right file out of the box.
+
+If that ever fails (e.g. the plugin is symlinked or loaded in an unusual way), pin
+the path explicitly. Add to `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "KURU_PY": "/absolute/path/to/kurukuru/scripts/kuru.py"
+  }
+}
+```
+
+Claude Code has no plugin-scoped env mechanism, so this goes in global settings.
+It's a one-time addition — once set, it overrides the `CLAUDE_PLUGIN_ROOT` fallback
+everywhere and across all workspaces. Restart Claude Code after saving.
+
+The last-resort fallback is the path `kuru init` records in `.kuru/engine` — useful
+if neither of the above is set.
 
 **The runner (optional, for unattended runs).** [`runner.py`](runner.py) lives at
 the repo root — it is **not** part of the plugin, it's a separate driver that
