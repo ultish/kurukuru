@@ -53,6 +53,10 @@ addendum) win.
 
 ## Release checklist (when cutting a version)
 
+**Trigger:** a version bump in `git diff` — whether you wrote it or not — means a
+release is being cut. Run this checklist before committing. Ownership of the commit
+implies ownership of the checklist; "someone else bumped it" is not an exception.
+
 1. **Update `CHANGELOG.md`** — move the `[Unreleased]` items under a new dated
    version section and start a fresh empty `[Unreleased]`. (Keep a Changelog format.)
 2. **Bump the version in all three places** (they must match):
