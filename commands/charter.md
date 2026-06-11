@@ -102,7 +102,7 @@ authoritative gate config gets set — the profile only informed it:
    to read `profile.json`; the profile is guidance, this gate is the authoritative,
    executable form. Omit the gate if no convention is deterministically checkable.
 4. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
-If the build pipeline isn't a preset, write the four gates by hand to match how this
+If the build pipeline isn't a preset, write the gates by hand to match how this
 repo actually typechecks / lints / tests / builds.
 
 **Resolve open questions here — don't punt them downstream.** The charter is the

@@ -15,4 +15,9 @@ Then give the user a short read of the board:
 - Any slice whose `gate-results.json` shows a failing last run.
 - The single most important next action (from `next`).
 
+For each `blocked` slice, also tell the user how to unblock it once the cause is
+resolved — `blocked` can exit to any status, usually back to where it was:
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> <status> --note "unblocked: <why>"`
+(e.g. back to `ready`/`in_progress`, or `dropped` if it should be retired).
+
 Keep it to a tight summary, not a dump.

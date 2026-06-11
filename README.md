@@ -40,8 +40,10 @@ reason and write prose; they cannot talk past the engine.
 
 Enforced **in code** (not by trust):
 1. Illegal state transitions are refused.
-2. A slice cannot become `verified` unless a recorded `kuru gate` run passed.
+2. A slice cannot become `verified` unless a recorded `kuru gate` run passed —
+   and is newer than the slice's latest build (stale green runs don't count).
 3. A builder (`--by builder`) may not set `verified` or `reviewed`.
+4. A slice cannot start while any of its `--depends-on` slices isn't `done`.
 
 (All three are demonstrated by the dry-run in [`impl/BUILD_PLAN.md`](impl/BUILD_PLAN.md) §7, SL-2,
 and exercised by [`scripts/selftest.sh`](scripts/selftest.sh).)
@@ -235,10 +237,16 @@ draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> d
                       ^                       |             |
                       +------- rejected <-----+-------------+   (code review can reject too)
 any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
+any (except done) -> dropped -> draft (resurrect)
 ```
 
 A code review that finds real problems rejects the slice (`verified -> rejected`),
 which routes it back to the builder — there is no `verified -> in_progress`.
+
+A slice that shouldn't be built after all (wrong scope, superseded) is **dropped**
+(`kuru set-status <id> dropped --note "<why>"`) — `next` and the loop ignore it.
+Resurrect it via `dropped -> draft` to re-write its contract under the same id, or
+cut a new slice; `doctor` flags anything still depending on a dropped slice.
 
 ## Files
 
@@ -247,7 +255,7 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        charter prd slice build verify review status next bearings loop
+├── commands/        init charter prd slice build verify review status next bearings loop
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier
 ├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
@@ -272,6 +280,11 @@ The `.kuru/` workspace (per target repo, created by `kuru init`):
 
 `ledger.json` + `gate-results.json` are machine truth (only `kuru.py` writes
 them). Everything else is narrative written by agents.
+
+**Commit `.kuru/`** in the target repo — it's the project's delivery memory.
+`kuru init` writes a `.kuru/.gitignore` that excludes the machine-local bits (the
+absolute `engine` path and transient `gate-*.log` files); everything else is meant
+to be shared.
 
 ## Design principles
 

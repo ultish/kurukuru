@@ -30,3 +30,14 @@ cannot become `verified` unless a recorded gate run passed — this is enforced 
 code, not by trust.
 
 Do not hand-edit `ledger.json` or `gate-results.json`; use `kuru` subcommands.
+
+## Commit this directory
+
+`.kuru/` is the project's delivery memory — charter, PRDs, slices, progress — and
+should be **committed**, so a teammate or a fresh session can pick up cold. The
+scaffolded `.kuru/.gitignore` excludes the only machine-local bits:
+
+- `engine` — an absolute path to `kuru.py` on one machine (`kuru init --force`
+  regenerates it after a clone or if the plugin moves);
+- `slices/*/gate-*.log` — transient gate output (each run's tail is preserved in
+  the committed `gate-results.json`).

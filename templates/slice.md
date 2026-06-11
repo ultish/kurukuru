@@ -44,7 +44,3 @@ A builder should not have to reverse-engineer intent from this section. -->
 contract. If you can't state one concretely, the slice boundary is wrong. -->
 1. **AC-1** — <observable, checkable fact>
 2. **AC-2** — <observable, checkable fact>
-
-## Gates
-<!-- Which config.json gates apply to this slice (default: all). -->
-typecheck, lint, unit, build

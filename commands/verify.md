@@ -6,8 +6,8 @@ argument-hint: "[slice-id]"
 Use the `verifying-a-slice` skill for context.
 
 Resolve the target: `$ARGUMENTS` if given, else the first slice in status `built`
-(`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status built`). A slice
-already in `verifying` (a resumed verification) is also a valid target.
+or `verifying` (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status built`,
+then `... ls --status verifying` — a `verifying` slice is a resumed verification).
 
 Claim it for verification before handing off — move it out of `built` so the
 board shows it's being checked:

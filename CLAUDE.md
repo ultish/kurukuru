@@ -40,6 +40,12 @@ addendum) win.
   prose. They must agree.
 - **Keep commands thin, skills deep.** Methodology goes in `skills/`, not duplicated
   into `commands/`.
+- **The conventions → `setup-conformance` mechanism is documented in five places,
+  deliberately** — each reader sees only one artifact after a context reset (and
+  templates ship into target repos without the plugin docs): `commands/charter.md`,
+  `skills/slicing-work`, `templates/profile.example.json`, `templates/charter.md`,
+  `templates/slice.md`. If you change the mechanism, update all five; they must
+  agree.
 - **Frontmatter must be valid YAML** in every command/agent/skill file.
 - The plugin is the tool; a target repo's `.kuru/` is per-project state — never
   commit a `.kuru/` workspace into this repo.

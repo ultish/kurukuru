@@ -26,9 +26,9 @@ For each agreed slice:
    ones — the engine then refuses to start it until those are `done`, and orders
    the loop safely. Sequence the walking-skeleton slice first, with no deps.)
 2. Fill its `slice.md` (goal, why-one-slice, inline context, in/out of scope,
-   dependencies, numbered acceptance criteria, gates).
+   dependencies, numbered acceptance criteria).
 3. Fill its `contract.yml` (done_definition, acceptance_criteria with
-   evidence_required, gates, out_of_scope) and set `frozen: true`.
+   evidence_required, out_of_scope) and set `frozen: true`.
 4. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> ready --note "contract frozen"`
 
 Finish with `kuru ls` and tell the user to run `/kuru:build`.

@@ -87,6 +87,10 @@ only enforces outcomes. Instead:
 - **Walking skeleton first.** The first slice should be a thin end-to-end path
   (one real flow through all layers), then later slices thicken it. This keeps the
   app shippable from slice 1 and surfaces integration risk early.
+- **Greenfield caveat:** on a fresh repo the configured gates may be unable to pass
+  until the toolchain exists — making them green is part of the walking-skeleton
+  slice's job (its ACs should include it). Use `"required": false` in `config.json`
+  only as a temporary warn-only measure, and flip it back once the gate can run.
 - Order so that **every slice leaves the app in a clean, shippable state**. Never
   leave a half-migration between slices.
 - Record cross-slice **dependencies** in `slice.md`. The builder of a later slice
@@ -96,8 +100,11 @@ only enforces outcomes. Instead:
 When a slice is ready to build, set `frozen: true` in `contract.yml` and
 `kuru set-status <id> ready`. From that moment the definition-of-done and
 acceptance criteria are **locked**. If you discover the scope was wrong:
-- re-`draft` the slice and re-cut it, or
-- create a new slice for the extra scope.
+- re-`draft` the slice and re-cut it,
+- create a new slice for the extra scope, or
+- retire it: `kuru set-status <id> dropped --note "<why>"` — `next` and the loop
+  ignore dropped slices, and `dropped -> draft` resurrects one for a re-write
+  (same id, so other slices' dependencies on it stay valid).
 
 Never let a builder silently change the contract to match what it built — that's
 the exact drift this harness exists to prevent.

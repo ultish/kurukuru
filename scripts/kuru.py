@@ -24,6 +24,7 @@ Usage:
 Statuses (the slice state machine):
   draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
   any -> blocked ;  verifying -> rejected -> in_progress
+  any (except done) -> dropped -> draft   (retire a slice; resurrect to re-write it)
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ import datetime as _dt
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -40,29 +42,27 @@ from pathlib import Path
 
 STATUSES = [
     "draft", "ready", "in_progress", "built",
-    "verifying", "verified", "rejected", "reviewed", "done", "blocked",
+    "verifying", "verified", "rejected", "reviewed", "done", "blocked", "dropped",
 ]
 
 # Allowed transitions. 'blocked' is reachable from anywhere and exits back to
-# wherever the human/agent decides, so it is handled separately.
+# wherever the human/agent decides, so it is handled separately. 'dropped'
+# retires a slice (wrong scope, superseded); everything except shipped (`done`)
+# work can be dropped, and a dropped slice can only be resurrected to `draft`
+# (same id, so dependents stay valid) for a re-write.
 TRANSITIONS = {
-    "draft": {"ready", "blocked"},
-    "ready": {"in_progress", "draft", "blocked"},
-    "in_progress": {"built", "blocked"},
-    "built": {"verifying", "in_progress", "blocked"},
-    "verifying": {"verified", "rejected", "blocked"},
-    "rejected": {"in_progress", "blocked"},
-    "verified": {"reviewed", "rejected", "blocked"},
-    "reviewed": {"done", "in_progress", "blocked"},
-    "done": {"in_progress"},  # reopen
+    "draft": {"ready", "blocked", "dropped"},
+    "ready": {"in_progress", "draft", "blocked", "dropped"},
+    "in_progress": {"built", "blocked", "dropped"},
+    "built": {"verifying", "in_progress", "blocked", "dropped"},
+    "verifying": {"verified", "rejected", "blocked", "dropped"},
+    "rejected": {"in_progress", "blocked", "dropped"},
+    "verified": {"reviewed", "rejected", "blocked", "dropped"},
+    "reviewed": {"done", "in_progress", "blocked", "dropped"},
+    "done": {"in_progress"},  # reopen; shipped work cannot be dropped
     "blocked": set(STATUSES),  # unblock to anywhere
+    "dropped": {"draft"},  # resurrect to re-write the slice
 }
-
-# Statuses an agent that is *implementing* is allowed to set on its own.
-# Crossing into 'verified'/'reviewed' requires --by human or the verifier/review
-# gate, never the builder. kuru enforces the gate facts; honesty about --by is a
-# convention the subagent prompts reinforce.
-BUILDER_SETTABLE = {"ready", "in_progress", "built", "blocked"}
 
 PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", Path(__file__).resolve().parent.parent))
 TEMPLATES = PLUGIN_ROOT / "templates"
@@ -96,7 +96,10 @@ def load_json(path: Path) -> dict:
 
 
 def save_json(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    # Atomic: a crash mid-write must never corrupt machine truth (ledger.json).
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
 
 
 def die(msg: str, code: int = 1):
@@ -224,6 +227,9 @@ def cmd_init(args):
         "progress.md": render(read_template("progress.md"), DATE=now(), PROJECT=root.name),
         "README.md": read_template("workspace-readme.md"),
         "init.sh": render(read_template("init.sh"), PROJECT=root.name),
+        # .kuru/ is meant to be committed (it's the project's delivery memory);
+        # this excludes only the machine-local bits.
+        ".gitignore": "# machine-local — do not commit\nengine\nslices/*/gate-*.log\n",
     }
     if profile is not None:
         # Persist the profile so /kuru:charter can pre-fill from it.
@@ -237,11 +243,12 @@ def cmd_init(args):
             path.chmod(0o755)
 
     # Record where THIS engine lives, captured now while we know our own path.
-    # Commands fall back to this when ${CLAUDE_PLUGIN_ROOT}/${KURU_PY} aren't set.
+    # A last-resort pointer for humans/agents when KURU_PY/CLAUDE_PLUGIN_ROOT
+    # aren't set (run: python3 "$(cat .kuru/engine)" <cmd>) — the inline command
+    # snippets do NOT read it automatically. Machine-local; gitignored above.
     engine = Path(__file__).resolve()
     (kd / "engine").write_text(str(engine) + "\n")
 
-    stack = (profile or {}).get("stack") or args.stack
     print(f"Initialized Kurukuru workspace at {kd}"
           + (f" (stack: {stack})" if stack else "")
           + (" (profile loaded)" if profile is not None else ""))
@@ -417,6 +424,12 @@ def cmd_set_status(args):
         if not gr["passed"]:
             die(f"cannot mark {s['id']} verified: last gate run FAILED "
                 f"({gr['summary']}). Fix and re-run `kuru gate {s['id']}`.")
+        # Freshness: a gate run recorded before the latest build is stale evidence.
+        built_at = max((h["at"] for h in s.get("history", [])
+                        if h.get("status") == "built"), default=None)
+        if built_at and _dt.datetime.fromisoformat(gr["ran_at"]) < _dt.datetime.fromisoformat(built_at):
+            die(f"cannot mark {s['id']} verified: last gate run ({gr['ran_at']}) is stale — "
+                f"it predates the latest build ({built_at}). Re-run `kuru gate {s['id']}`.")
     if new in {"verified", "reviewed"} and args.by == "builder":
         die(f"a builder may not set '{new}'. This requires the verifier/reviewer (--by human|verifier).")
 
@@ -455,14 +468,21 @@ def _run_one_gate(cmd: str, timeout: int, cwd, logp: Path) -> tuple[int, list[st
     proc = subprocess.Popen(
         cmd, shell=True, cwd=cwd, text=True, bufsize=1,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        start_new_session=True,  # own process group, so the watchdog can kill children too
     )
 
     def _kill():
         killed["v"] = True
+        # Kill the whole process group: killing just the shell leaves children
+        # (gradle/npm/...) alive holding the stdout pipe, which would wedge the
+        # read loop below — the exact silent hang the watchdog exists to stop.
         try:
-            proc.kill()
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except Exception:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     timer = threading.Timer(timeout, _kill)
     timer.start()
@@ -564,11 +584,16 @@ def cmd_doctor(args):
         problems.append(f"config.json invalid: {e}")
     try:
         led = load_json(kd / "ledger.json")
-        ids = {s["id"] for s in led.get("slices", [])}
+        status_by_id = {s["id"]: s["status"] for s in led.get("slices", [])}
         for s in led.get("slices", []):
+            if s["status"] == "dropped":
+                continue
             for d in deps_of(s):
-                if d not in ids:
+                if d not in status_by_id:
                     problems.append(f"{s['id']} depends on unknown slice {d}")
+                elif status_by_id[d] == "dropped":
+                    problems.append(f"{s['id']} depends on dropped slice {d} "
+                                    f"(resurrect it with `set-status {d} draft`, or re-cut the dependency)")
     except Exception as e:
         problems.append(f"ledger.json invalid: {e}")
     if problems:

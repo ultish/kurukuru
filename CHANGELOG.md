@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-11
+
+### Added
+- **`dropped` status — retire a slice without faking or hand-editing.** Any slice
+  except shipped (`done`) work can be set `dropped` (wrong scope, superseded);
+  `next` and the loop ignore it, `doctor` flags slices that still depend on a
+  dropped one, and `dropped → draft` resurrects it for a contract re-write under
+  the same id. Previously a wrongly-cut slice could only sit `blocked` forever —
+  and parking it as `draft` poisoned `/kuru:loop`'s preconditions.
+- **Gate freshness is enforced in code.** `set-status <id> verified` now also
+  requires the recorded gate run to be newer than the slice's latest transition
+  into `built` — a green run from before a rebuild is rejected as stale evidence.
+- **Subagents can actually load their skills.** The builder/verifier/planner
+  agents said "follow the X skill", but their `tools:` allowlists omitted the
+  `Skill` tool, so the deep methodology never reached them (confirmed by probing a
+  live builder subagent: no Skill tool, no skill content in context). All three
+  now get `Skill` plus an explicit load-the-skill-first instruction with a Read
+  fallback.
+
+- **`.kuru/` commit guidance + scaffolded `.kuru/.gitignore`.** The workspace is
+  meant to be committed (charter, PRDs, slices, progress are the project's memory);
+  `kuru init` now writes a `.kuru/.gitignore` excluding the only machine-local
+  bits: the absolute `engine` path and transient `gate-*.log` files. Documented in
+  the workspace README and the main README.
+- **Unblock guidance in `/kuru:status`.** The dashboard now tells the user how to
+  release a `blocked` slice once its cause is resolved (`set-status <id> <status>`
+  — blocked exits to anywhere).
+- **Greenfield gate caveat in `slicing-work`.** On a fresh repo the gates may not
+  be able to pass until the toolchain exists; making them green is explicitly part
+  of the walking-skeleton slice's job.
+
+### Changed
+- **`/kuru:loop`'s review step no longer assumes `/code-review` exists** — it
+  falls back to the repo's review skill or a careful manual diff review, matching
+  `/kuru:review`'s wording.
+- **`smoke-headless.sh` pass condition tightened** — it now requires the slice id
+  or title in the output; generic words ("draft", "dashboard") no longer count as
+  proof the command resolved.
+- **Ledger writes are atomic.** `save_json` writes a temp file and `os.replace`s
+  it into place, so a crash or killed terminal mid-write can no longer corrupt
+  `ledger.json` / `gate-results.json`.
+- **Gate timeouts kill the whole process group.** The watchdog previously killed
+  only the shell; a hung gradle/npm child survived the timeout holding the stdout
+  pipe open, wedging the gate run — the exact silent hang the timeout exists to
+  stop. Gates now run in their own session and get `SIGKILL`ed as a group.
+
+### Removed
+- **The dead per-slice `gates:` field.** The `contract.yml` and `slice.md`
+  templates implied each slice could select which gates apply, but the engine
+  never read them — `kuru gate` always runs every gate in `config.json` (and the
+  defaults named gates that don't exist on gradle/maven/python stacks). The
+  templates now state plainly that gates are global. Also removed the unused
+  `BUILDER_SETTABLE` constant from the engine.
+
+### Fixed
+- README: `init` was missing from the commands list; the "enforced in code" list
+  now matches the engine's actual rules (gate freshness, dependency start guard);
+  the state-machine diagrams (README + `kuru-method`, which claimed "three rules"
+  while listing four) now agree and include `dropped`.
+- `/kuru:verify` target resolution now also looks for a resumed `verifying` slice,
+  matching its own prose.
+- `runner.py` stall-guard comment now matches its behavior (one retry, then block).
+- Changelog version links: added the missing `[0.2.1]` reference and repointed
+  `[Unreleased]`.
+
 ## [0.2.1] - 2026-06-11
 
 ### Added
@@ -140,7 +205,9 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.1.3...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v0.3.0...HEAD
+[0.3.0]: https://example.com/kurukuru/compare/v0.2.1...v0.3.0
+[0.2.1]: https://example.com/kurukuru/compare/v0.1.3...v0.2.1
 [0.1.3]: https://example.com/kurukuru/compare/v0.1.1...v0.1.3
 [0.1.1]: https://example.com/kurukuru/compare/v0.1.0...v0.1.1
 [0.1.0]: https://example.com/kurukuru/releases/tag/v0.1.0

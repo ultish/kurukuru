@@ -37,9 +37,10 @@ echo "----- claude output (exit $rc) -----"
 printf '%s\n' "$OUT"
 echo "------------------------------------"
 
-# The command resolved iff the model actually saw kuru.py output (the slice id /
-# board). If the slash command didn't resolve, the output won't mention SL-0001.
-if printf '%s' "$OUT" | grep -qiE "SL-0001|smoke slice|dashboard|draft"; then
+# The command resolved iff the model actually saw kuru.py output: the slice id or
+# title must appear. (Generic words like "draft"/"dashboard" are NOT accepted —
+# the model could say those without the command having resolved.)
+if printf '%s' "$OUT" | grep -qiE "SL-0001|smoke slice"; then
   echo "SMOKE PASS: /kuru:status resolved via --plugin-dir and ran kuru.py in the headless session."
   exit 0
 fi

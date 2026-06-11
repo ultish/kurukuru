@@ -18,8 +18,8 @@ acceptance_criteria:
   #   kind: observed
   #   evidence_required: "..."
 
-# Deterministic gates that must be green (must exist as keys in .kuru/config.json).
-gates: [typecheck, lint, unit, build]
+# Gates are global, not per-slice: `kuru gate` runs EVERY gate in .kuru/config.json,
+# and all required ones must be green before this slice can become verified.
 
 out_of_scope:
   - "REPLACE: things explicitly NOT in this slice, so the verifier doesn't fail it for them."

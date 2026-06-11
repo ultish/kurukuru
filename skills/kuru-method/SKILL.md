@@ -52,16 +52,24 @@ draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> d
                       ^                       |             |
                       +------- rejected <-----+-------------+   (review can reject too)
 any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
+any (except done) -> dropped -> draft (resurrect)
 ```
 
 Both the verifier (`verifying -> rejected`) and code review (`verified ->
 rejected`) send a slice back to the builder. There is no `verified -> in_progress`;
 a failed review rejects, and `rejected -> in_progress` resumes the build.
 
-Three rules are enforced **in code** — you cannot talk your way past them:
+`dropped` retires a slice that should not be built (wrong scope, superseded —
+`kuru set-status <id> dropped --note "<why>"`). `next` and the loop ignore it.
+Resurrect it with `dropped -> draft` to re-write its contract under the same id
+(dependents stay valid), or cut a new slice; `doctor` flags any slice that still
+depends on a dropped one. Shipped (`done`) work cannot be dropped.
+
+Four rules are enforced **in code** — you cannot talk your way past them:
 1. Illegal transitions are refused.
-2. A slice cannot reach `verified` unless a recorded gate run exists **and**
-   passed (`kuru gate <id>` must be green).
+2. A slice cannot reach `verified` unless a recorded gate run exists, **passed**,
+   and is **fresh** — newer than the slice's latest transition into `built`
+   (`kuru gate <id>` must be re-run after a rebuild).
 3. `--by builder` may not set `verified` or `reviewed`.
 4. A slice cannot **start** (`ready → in_progress`) while any of its
    `--depends-on` slices is not `done`.

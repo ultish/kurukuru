@@ -181,7 +181,8 @@ class Runner:
                     print("   Stopping for a human.")
                     return 1
 
-            # stall guard: same slice+status twice in a row after we acted = no progress
+            # stall guard: same slice+status again after we acted = no progress;
+            # allow one retry, then block (i.e. stop on the third consecutive sighting)
             key = (sid, status)
             if key == last_key:
                 stalls += 1

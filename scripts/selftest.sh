@@ -30,9 +30,10 @@ trivial_gates() { printf '{"project":"t","gates":{"unit":{"cmd":"true","required
 echo "== SL-1: init + new-slice scaffold =="
 newrepo >/dev/null
 expect_ok   "init scaffolds .kuru" $KURU init
-for f in config.json ledger.json charter.md progress.md README.md init.sh; do
+for f in config.json ledger.json charter.md progress.md README.md init.sh .gitignore; do
   [ -f ".kuru/$f" ] && ok "init wrote $f" || fail "init missing $f"
 done
+grep -q "^engine$" .kuru/.gitignore && ok ".gitignore excludes machine-local engine path" || fail ".gitignore missing engine"
 [ -x ".kuru/init.sh" ] && ok "init.sh is executable" || fail "init.sh not executable"
 [ -f ".kuru/engine" ] && grep -q "kuru.py" .kuru/engine && ok "init records engine path (.kuru/engine)" || fail "engine path not recorded"
 expect_ok   "doctor healthy" $KURU doctor
@@ -176,6 +177,36 @@ $KURU init >/dev/null; trivial_gates; $KURU new-slice "a" >/dev/null
 $KURU ls --json | python3 -c "import json,sys; a=json.load(sys.stdin); assert isinstance(a,list) and a[0]['id']=='SL-0001'" \
   && ok "ls --json is a parseable array" || fail "ls --json bad"
 
+echo "== dropped: retire a slice; resurrect via draft =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "wrong scope" >/dev/null
+$KURU new-slice "needs 1" --depends-on SL-0001 >/dev/null
+$KURU set-status SL-0001 ready >/dev/null
+$KURU set-status SL-0002 ready >/dev/null
+expect_ok "ready->dropped" $KURU set-status SL-0001 dropped --note "re-writing"
+$KURU next --json | grep -q '"next_action": "none"' && ok "next ignores dropped slices" || fail "next acted on a dropped slice"
+expect_fail "doctor flags dependency on dropped slice" "dropped" $KURU doctor
+expect_fail "dropped->ready refused (resurrect via draft)" "illegal transition" $KURU set-status SL-0001 ready
+expect_ok "dropped->draft resurrects (same id, deps stay valid)" $KURU set-status SL-0001 draft
+expect_ok "doctor healthy after resurrect" $KURU doctor
+
+echo "== gate freshness: a stale gate run cannot unlock verified =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+$KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU set-status SL-0001 rejected --by verifier >/dev/null
+$KURU set-status SL-0001 in_progress >/dev/null
+sleep 1   # the rebuild timestamp must be strictly after the old gate run
+$KURU set-status SL-0001 built --by builder >/dev/null
+$KURU set-status SL-0001 verifying --by verifier >/dev/null
+expect_fail "stale gate run refused after rebuild" "stale" $KURU set-status SL-0001 verified --by verifier
+$KURU gate SL-0001 >/dev/null 2>&1
+expect_ok "fresh gate run unlocks verified" $KURU set-status SL-0001 verified --by verifier
+
 echo "== SL-6: full draft->done lifecycle runs clean =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "ship it" >/dev/null
@@ -190,6 +221,7 @@ expect_ok "verifying"  $KURU set-status SL-0001 verifying --by verifier
 expect_ok "verified"   $KURU set-status SL-0001 verified --by verifier
 expect_ok "reviewed"   $KURU set-status SL-0001 reviewed --by reviewer
 expect_ok "done"       $KURU set-status SL-0001 done
+expect_fail "shipped (done) work cannot be dropped" "illegal transition" $KURU set-status SL-0001 dropped
 $KURU ls --status done | grep -q SL-0001 && ok "board ends all-done" || fail "slice not done"
 
 echo
