@@ -1,5 +1,5 @@
 {
-  "_help": "Reusable environment profile for `kuru init --profile <thisfile>`. Copy it OUTSIDE the plugin (e.g. ~/.kuru/profiles/gradle-kube.json) and edit for your org. The profile is GUIDANCE, not gospel: 'stack' seeds the initial gate preset at init; 'config' and 'environment' are read by /kuru:charter, which summarizes them back to you, fills any gaps, then writes the authoritative .kuru/config.json and folds the rest into the charter. Nothing here is secret-by-design — internal URLs are fine, but gitignore the profile if you prefer.",
+  "_help": "Reusable environment profile for `kuru init --profile <thisfile>`. Copy it OUTSIDE the plugin (e.g. ~/.kuru/profiles/gradle-kube.json) and edit for your org. The profile is GUIDANCE, not gospel: 'stack' seeds the initial gate preset at init; 'config', 'environment', and 'conventions' are read by /kuru:charter, which summarizes them back to you, fills any gaps, then writes the authoritative .kuru/config.json and folds the rest into the charter. Nothing here is secret-by-design — internal URLs are fine, but gitignore the profile if you prefer.",
   "stack": "gradle",
   "config": {
     "_help": "OPTIONAL. Omit to just use the 'stack' preset. If present, /kuru:charter uses these gate commands as the STARTING POINT when it writes config.json (it confirms/tailors them with you first — they are not applied verbatim). Air-gapped example: gradle --offline against a populated cache.",
@@ -20,5 +20,16 @@
       "notes": "no internet during build; init.gradle points at the mirror; gradle runs --offline"
     },
     "reference_project": "git@internal.example:platform/service-template.git"
+  },
+  "conventions": {
+    "_help": "OPTIONAL. Reusable 'how we build here' rules that are NOT gate commands — the org-specific tooling/skills a builder must use. /kuru:charter folds these into the charter's 'Required tooling / conventions' section (confirming with you, asking only for gaps). Each 'verify' line is then enforced by the strongest mechanism that fits it: deterministic ones (a file exists, a string is/isn't present, a command exits 0) get COMPILED INTO A `setup-conformance` GATE in config.json — machine-checked on every slice; judgmental ones become acceptance criteria the verifier checks, with the 'rule' named in slice context as the cheapest path. IMPORTANT: state every 'verify' as a CHECKABLE FACT about the resulting artifact — the harness can only enforce OUTCOMES, never 'did the agent invoke skill X'. A rule with no checkable 'verify' cannot be enforced and will be treated as a soft suggestion.",
+    "build_setup": {
+      "rule": "Generate all Gradle build files via the `setup-gradle` skill — it encodes the air-gap mirror, version catalog, and plugin set. Do NOT hand-write them; hand-rolled versions get the mirror/plugins wrong and fail the offline build gate.",
+      "verify": [
+        "settings.gradle.kts / init.gradle point repositories at the internal nexus mirror, not Maven Central",
+        "gradle/libs.versions.toml exists and pins plugin and library versions via the catalog",
+        "`./gradlew --offline assemble` exits 0"
+      ]
+    }
   }
 }

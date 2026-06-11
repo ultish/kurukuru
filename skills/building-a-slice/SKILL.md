@@ -16,8 +16,16 @@ verifier. You build; you do not judge your own work.
    the contract is genuinely wrong or impossible, **stop**, set the slice
    `blocked` with a note, and escalate to re-slicing. Do not quietly redefine done.
 2. **Get oriented.** Read `.kuru/progress.md` and the code/patterns the slice
-   names. Match the codebase's existing conventions (naming, error handling,
-   test style) — you are extending an enterprise codebase, not starting fresh.
+   names. Conventions are something you **adopt, not assert**: where the codebase
+   already has them (naming, error handling, test style), match them instead of
+   inventing your own; where the slice context names a tool, skill, or reference
+   setup to use, *that* is the convention — use it. This holds **especially** on a
+   greenfield or setup slice, where "there's nothing to copy yet" is not license to
+   improvise an equivalent because you "know the parameters" — the named tooling
+   exists precisely because the details (mirror URLs, plugin versions, layout) are
+   easy to get wrong by hand. If the named tooling genuinely seems wrong or
+   unnecessary, you don't silently skip it — set the slice `blocked` with a note and
+   escalate.
 3. **Make a vertical change.** Implement every layer the acceptance criteria need —
    data, service, API, UI — plus:
    - **Tests** that correspond to the acceptance criteria (a verifier will look

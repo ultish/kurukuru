@@ -52,6 +52,37 @@ later means re-`draft`ing slices — the drift this harness exists to prevent.
 | "The list is fast" | "GET /items?limit=50 returns in < 200ms p95 in the load test" |
 | "Errors are handled" | "When the upstream returns 500, the UI shows the error state and logs an `upstream_error` event" |
 
+### Required tooling/conventions become checkable ACs, not "use skill X"
+
+If the charter's **Required tooling / conventions** names a skill, generator, or
+reference setup a builder must use (e.g. "generate the Gradle build files with the
+`setup-gradle` skill"), do **not** write the instruction "use skill X" as an
+acceptance criterion. A builder can — and will — rationalize its way around an
+unverifiable means ("it's just a template, I know the params"), because the harness
+only enforces outcomes. Instead:
+
+- **Write the AC as the checkable artifact the tool produces.** Not "uses the
+  `setup-gradle` skill" but "`gradle/libs.versions.toml` pins versions via the
+  catalog; `settings.gradle.kts` repositories point at the internal mirror, not Maven
+  Central; `./gradlew --offline assemble` exits 0." Now a hand-rolled wrong version
+  fails a gate and gets rejected, regardless of how it was built.
+- **Prefer a gate over an AC for the deterministic facts.** If charter compiled the
+  convention's checkable artifacts into a `setup-conformance` gate in `config.json`
+  (a `grep`/`test` assertion), the setup slice's done-ness is enforced by the engine,
+  not agent judgment — the strongest form, and it keeps holding as a regression guard
+  on later slices. In that case the slice's AC can simply point at the gate
+  ("`setup-conformance` and `build` are green"). Reserve hand-written ACs for the
+  **judgmental** facts a grep can't capture (e.g. "the module layout follows the
+  reference project"), which the verifier checks by inspection.
+- **Name the skill in the slice's context as the *cheapest path* to that AC**, with
+  the consequence of skipping it spelled out: "Generate these via the `setup-gradle`
+  skill — it encodes the air-gap mirror, catalog, and plugin set; hand-written
+  versions fail the offline gate." This removes the "I know the params" escape hatch
+  without pretending the harness can force a skill invocation (it can't).
+- This applies **most** on a greenfield/setup slice, where there's no existing code
+  to copy — the convention is the only thing standing between the builder and
+  improvisation. Make those ACs concrete enough that improvising is the *slower* path.
+
 ## Sequencing slices
 - **Walking skeleton first.** The first slice should be a thin end-to-end path
   (one real flow through all layers), then later slices thicken it. This keeps the

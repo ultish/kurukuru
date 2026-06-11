@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-11
+
+### Added
+- **`conventions` block in the environment profile.** `profile.example.json` gains a
+  first-class `conventions` field: org-specific "how we build here" rules (skills,
+  generators, reference setups) that are not gate commands, each pairing a `rule`
+  (the means) with a `verify` list (the checkable artifact it produces). `/kuru:charter`
+  reads these as guidance, confirms them with the user (pinning down a checkable
+  outcome where the profile omits one), and records them in a new **Required tooling /
+  conventions** charter section. Previously such rules lived in freeform notes and were
+  lost in summarization before reaching the contract.
+
+- **"Outcomes gate, not means" is now a stated discipline.** The `kuru-method` skill
+  gains a third non-negotiable discipline: a requirement the engine can't check ("use
+  skill X") is only as real as the checkable artifact attached to it. This is the
+  thesis behind the convention/gate changes below.
+
+### Changed
+- **Required tooling becomes a checkable outcome, not "use skill X".** `slicing-work`
+  now turns each convention into the *artifact the tool produces* (e.g. catalog file
+  present, `--offline assemble` exits 0) and names the skill in slice context as the
+  cheapest path with the consequence of skipping it spelled out. The harness can only
+  enforce outcomes, never "the agent invoked skill X", so an ignoring builder is now
+  caught rather than trusted. Enforcement is layered by what each artifact admits:
+  deterministic facts (a file exists, a string is/isn't present, a command exits 0)
+  are **compiled by `/kuru:charter` into a `setup-conformance` gate** in `config.json`
+  — a cheap `grep`/`test` assertion that runs on every slice (machine-checked, and a
+  free regression guard since these are invariants); judgmental facts stay acceptance
+  criteria the verifier checks. No engine change — a gate is just a command, and the
+  profile is never executed directly (it informs the gate charter writes).
+- **Builder is no longer told it's "extending, not starting fresh."** Both the
+  `building-a-slice` skill (step 2) and the `kuru-builder` agent's mirrored rule
+  reframe conventions as *adopt, not assert*: match existing conventions where they
+  exist, use the slice's named tooling where it doesn't, and treat greenfield/setup
+  slices as where this matters *more* — not an exemption. Doubt about named tooling now
+  routes to `blocked` + escalate instead of silent improvisation. The old wording read
+  as license to "do its own thing" on fresh projects.
+
 ## [0.1.3] - 2026-06-07
 
 ### Added

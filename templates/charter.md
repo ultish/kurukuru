@@ -28,6 +28,17 @@ error rate, conversion, cost). "Better UX" is not a metric. -->
 - **Air-gapped / restricted constraints:** <!-- internal registries (.npmrc / settings.xml / init.gradle / .cargo/config.toml), offline build flags, no internet during build. Be specific — the builder must conform. Endpoints may be left as "TBD — to provide" if the user is supplying them later. -->
 - **Reference template / project:** <!-- path or repo to copy build config, registry settings, and layout from, or "none" -->
 
+## Required tooling / conventions
+<!-- Org-specific "how we build here" rules that are NOT gate commands: skills,
+generators, or reference setups a builder MUST use, each paired with the CHECKABLE
+artifact it produces. These flow from profile.conventions (confirmed with the user)
+and get turned into concrete acceptance criteria during slicing. State the outcome,
+not just the means — the harness enforces "the catalog file exists / the offline
+build passes", never "the agent used skill X". "none" if there are no such rules.
+  - **<rule>** -> verify: <checkable artifact>
+    e.g. **Generate Gradle build files with the `setup-gradle` skill** -> verify:
+    gradle/libs.versions.toml pins versions via the catalog; ./gradlew --offline assemble exits 0 -->
+
 ## Constraints
 <!-- Non-technical constraints: integrations we must support, compliance regimes
 (SOC2 / HIPAA / GDPR / PCI), performance/SLO targets, hard deadlines, budget.

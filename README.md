@@ -139,13 +139,19 @@ A profile is plain JSON you keep **outside the plugin** (see
   mirror) that `/kuru:charter` uses as a **starting point**, and
 - `environment` — language/version, deploy target, and **internal registry
   endpoints** that pre-fill the charter's Technical environment so you don't
-  re-type them each time.
+  re-type them each time, and
+- `conventions` — org-specific "how we build here" rules that aren't gate commands
+  (e.g. "generate the Gradle build files with the `setup-gradle` skill"), each paired
+  with the **checkable artifact** it produces. Deterministic ones get compiled into a
+  `setup-conformance` gate so a builder that ignores the rule fails a gate, not just a
+  reviewer's patience; judgmental ones become acceptance criteria.
 
 The profile is **guidance, not gospel**. `init` seeds a starting `config.json` from
 `stack` (or the node default) and stashes the profile at `.kuru/profile.json`. Then
 `/kuru:charter` reads it, **summarizes it back to you, hunts for gaps to confirm**,
-writes the authoritative `config.json`, and folds the rest (endpoints, deploy
-target) into the charter — rather than applying any of it verbatim. Internal
+writes the authoritative `config.json` (including any `setup-conformance` gate
+distilled from `conventions`), and folds the rest (endpoints, deploy target,
+required tooling) into the charter — rather than applying any of it verbatim. Internal
 endpoints you'd rather not commit can be left out of the profile and supplied at the
 end of the charter (which lets you skip them for later).
 

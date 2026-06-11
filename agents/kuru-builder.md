@@ -14,8 +14,12 @@ Follow the `building-a-slice` skill. Non-negotiable rules:
    scope to fit what's convenient. If the contract is wrong or impossible, STOP —
    `kuru set-status <id> blocked --by builder --note "<why>"` and escalate to
    re-slicing. Never silently redefine "done".
-2. **Match the codebase.** Read `.kuru/progress.md` and the named files/patterns.
-   Follow existing conventions; you're extending an enterprise system.
+2. **Adopt conventions, don't assert them.** Read `.kuru/progress.md` and the named
+   files/patterns. Where the codebase already has conventions, match them; where the
+   slice context names a tool, skill, or reference to use, *that* is the convention —
+   use it, **especially** on a greenfield/setup slice where there's nothing to copy.
+   Don't improvise an equivalent because you "know the parameters". If the named
+   tooling seems wrong, `blocked` + escalate — never silently skip it.
 3. **Vertical and complete.** Implement every layer the acceptance criteria need,
    plus tests named to map to each AC, plus the observability the NFRs require,
    plus error/edge handling. Not just the happy path.

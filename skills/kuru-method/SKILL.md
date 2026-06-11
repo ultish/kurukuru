@@ -66,7 +66,7 @@ Three rules are enforced **in code** — you cannot talk your way past them:
 4. A slice cannot **start** (`ready → in_progress`) while any of its
    `--depends-on` slices is not `done`.
 
-## Two non-negotiable disciplines
+## Three non-negotiable disciplines
 
 - **Separation of work and judgment.** The agent that builds a slice never
   verifies it. Building is collaborative; verifying is adversarial. This
@@ -77,6 +77,10 @@ Three rules are enforced **in code** — you cannot talk your way past them:
   `/kuru:bearings` to reconstruct state from `progress.md`, `ledger.json`, and
   git. At session end, update `progress.md`. If you're running low on context,
   **do not fake done to wrap up** — set the slice `blocked` with a note.
+- **Outcomes gate, not means.** A requirement the engine can't check ("use skill
+  X", "follow convention Y") is only as real as the checkable artifact you attach
+  to it. Express required means as verifiable ends — a gate or an acceptance
+  criterion — or they're suggestions a builder will rationalize away.
 
 ## Artifacts (where truth lives)
 
