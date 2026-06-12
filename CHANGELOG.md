@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-12
+
+### Fixed
+- **Subagents can resolve `kuru` again.** The builder/verifier/planner agents and
+  the build/verify skills wrote gate and status commands as a bare `kuru <cmd>`,
+  but `kuru.py` ships inside the plugin and is **not** on `PATH` — so a subagent in
+  a fresh context (which loads its task skill, not `kuru-method`, where the
+  resolution order was documented) ran `kuru` literally and failed with "command
+  not found". Each subagent entry point (`kuru-builder`, `kuru-verifier`,
+  `kuru-planner`) and the two task skills (`building-a-slice`, `verifying-a-slice`)
+  now carry a short "Running `kuru`" note mapping the shorthand to
+  `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>`, with the
+  `.kuru/engine` fallback. The slash commands were already unaffected — they use
+  the explicit form.
+
 ## [0.3.0] - 2026-06-11
 
 ### Added
@@ -205,7 +220,8 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.3.0...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v0.3.1...HEAD
+[0.3.1]: https://example.com/kurukuru/compare/v0.3.0...v0.3.1
 [0.3.0]: https://example.com/kurukuru/compare/v0.2.1...v0.3.0
 [0.2.1]: https://example.com/kurukuru/compare/v0.1.3...v0.2.1
 [0.1.3]: https://example.com/kurukuru/compare/v0.1.1...v0.1.3

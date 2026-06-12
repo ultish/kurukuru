@@ -4,10 +4,6 @@ An enterprise delivery harness for coding agents (Claude Code plugin). It turns 
 coding agent into a disciplined pipeline for shipping **production** software
 across many sessions — not vibe-coding, not hobby projects.
 
-```
-charter -> prd -> slice -> build -> verify -> review -> done
-```
-
 Shared understanding becomes a PRD; the PRD becomes **vertical slices** that are
 small enough for one agent session yet complete enough to build without guessing;
 a builder agent implements one slice; a **separate** verifier agent gatekeeps it

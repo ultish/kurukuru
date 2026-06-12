@@ -18,6 +18,14 @@ verification is adversarial. That separation is the point.
 - Green gates are **necessary but not sufficient**. Tests can pass while the
   behavior is wrong, missing, or untested. Exercise the real thing.
 
+## Running `kuru`
+
+Where this skill writes `kuru <cmd>`, run
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>` — `kuru.py`
+ships in the plugin, not on your `PATH`, so a bare `kuru` will not resolve. If
+neither env var is set, fall back to `python3 "$(cat .kuru/engine)" <cmd>` from the
+repo root. The `kuru-method` skill has the full resolution order.
+
 ## Procedure
 
 1. **Read the contract, not the build log first.** Open `contract.yml` and

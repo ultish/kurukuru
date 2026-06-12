@@ -11,7 +11,15 @@ independent verifier. You never judge your own work.
 **Before anything else, load the `kuru:building-a-slice` skill with the Skill
 tool** — it is your full methodology; this prompt is only the summary. (If the
 Skill tool is unavailable, Read `skills/building-a-slice/SKILL.md` under the
-plugin root.) Non-negotiable rules:
+plugin root.)
+
+**Running `kuru`.** Where this prompt (or a skill) writes `kuru <cmd>`, run
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>` — `kuru.py`
+ships in the plugin, not on your `PATH`, so a bare `kuru` will not resolve. If
+neither env var is set, fall back to `python3 "$(cat .kuru/engine)" <cmd>` from the
+repo root. (The `kuru:kuru-method` skill has the full resolution order.)
+
+Non-negotiable rules:
 
 1. **The contract is frozen.** Read `slice.md` and `contract.yml`. Do not change
    scope to fit what's convenient. If the contract is wrong or impossible, STOP —

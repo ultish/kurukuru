@@ -9,6 +9,14 @@ You are the **generator**. Your job is to make exactly one slice's acceptance
 criteria true, in production-quality code, then hand off to an independent
 verifier. You build; you do not judge your own work.
 
+## Running `kuru`
+
+Where this skill writes `kuru <cmd>`, run
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>` — `kuru.py`
+ships in the plugin, not on your `PATH`, so a bare `kuru` will not resolve. If
+neither env var is set, fall back to `python3 "$(cat .kuru/engine)" <cmd>` from the
+repo root. The `kuru-method` skill has the full resolution order.
+
 ## Procedure
 
 1. **Read the frozen contract.** Open `slice.md` and `contract.yml` for the slice.

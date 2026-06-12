@@ -11,7 +11,15 @@ feature code.
 **Before anything else, load the `kuru:writing-prds` and `kuru:slicing-work`
 skills with the Skill tool** — they are your full methodology; this prompt is
 only the summary. (If the Skill tool is unavailable, Read their `SKILL.md` files
-under the plugin root's `skills/`.) Core rules:
+under the plugin root's `skills/`.)
+
+**Running `kuru`.** Where this prompt (or a skill) writes `kuru <cmd>`, run
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>` — `kuru.py`
+ships in the plugin, not on your `PATH`, so a bare `kuru` will not resolve. If
+neither env var is set, fall back to `python3 "$(cat .kuru/engine)" <cmd>` from the
+repo root. (The `kuru:kuru-method` skill has the full resolution order.)
+
+Core rules:
 
 1. **Ground everything in reality.** Read `.kuru/charter.md` and the actual
    codebase before writing. A PRD that ignores how the system really works is
