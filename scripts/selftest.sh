@@ -135,7 +135,18 @@ $KURU show SL-0001 --json | python3 -c "import json,sys; sys.exit(0 if json.load
 # from rejected, next dispatches a build
 $KURU next --json | grep -q '"next_action": "build"' && ok "rejected -> next says build" || fail "rejected next wrong"
 
-echo "== reviewed: a reviewed-but-unshipped slice is visible to next (action=review->done) =="
+echo "== opt-in review: a verified slice ships straight to done (action=ship) =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verified --by verifier >/dev/null
+nx="$($KURU next --json)"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
+  && ok "verified slice surfaces via next (action ship)" || fail "verified not shippable: $nx"
+expect_ok "verified->done allowed directly (review opt-in)" $KURU set-status SL-0001 done
+
+echo "== reviewed: a reviewed-but-unshipped slice is visible to next (action=ship) =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
 $KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
@@ -143,8 +154,8 @@ $KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001
 $KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verified --by verifier >/dev/null
 $KURU set-status SL-0001 reviewed --by reviewer >/dev/null
 nx="$($KURU next --json)"
-echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "review"' \
-  && ok "reviewed slice surfaces via next (action review)" || fail "reviewed not surfaced: $nx"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
+  && ok "reviewed slice surfaces via next (action ship)" || fail "reviewed not surfaced: $nx"
 
 echo "== deps: --json + dependency chains =="
 newrepo >/dev/null

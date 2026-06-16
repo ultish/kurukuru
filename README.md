@@ -7,9 +7,9 @@ across many sessions — not vibe-coding, not hobby projects.
 Shared understanding becomes a PRD; the PRD becomes **vertical slices** that are
 small enough for one agent session yet complete enough to build without guessing;
 a builder agent implements one slice; a **separate** verifier agent gatekeeps it
-against a **frozen contract** with concrete evidence and deterministic gates; then
-it's code-reviewed. Progress is tracked in files so each session can pick up
-cold.
+against a **frozen contract** with concrete evidence and deterministic gates;
+optionally, a slice is also code-reviewed before it ships. Progress is tracked in
+files so each session can pick up cold.
 
 ## Why (the three sources)
 
@@ -101,7 +101,7 @@ Then, in Claude Code:
 /kuru:slice <feature>    # PRD -> vertical slices with frozen contracts
 /kuru:build              # kuru-builder implements the next ready slice -> built
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
-/kuru:review             # code review -> reviewed -> done
+/kuru:review             # OPTIONAL code review of a verified slice -> reviewed -> done
 /kuru:status             # dashboard      /kuru:next   # what to do next
 /kuru:bearings           # run at the start of every session
 ```
@@ -109,9 +109,9 @@ Then, in Claude Code:
 The first three steps need a human (discovery, scoping, slicing). Once slices have
 frozen contracts, the rest is mechanical. There are two ways to drive it:
 
-- **In-session:** `/kuru:loop` runs build → verify → review → done over the ready
-  slices until the board is clear — good for watching it work or testing without
-  the runner.
+- **In-session:** `/kuru:loop` runs build → verify → done over the ready slices
+  until the board is clear (code review is opt-in — run `/kuru:review` by hand) —
+  good for watching it work or testing without the runner.
 - **Headless / unattended:** [`runner.py`](runner.py) — see below.
 
 Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
@@ -166,11 +166,12 @@ upgrade.)
 `runner.py` is a standalone Python loop (stdlib only) that drives the plugin with
 no human in the chair. It reads engine state (`kuru next --json`) to **decide**
 the next step, then launches a **fresh `claude -p` session** to **do** it
-(`/kuru:build`, `/kuru:verify`, `/kuru:review`) — repeating until the board is
-clear. Each step is its own process, so context never accumulates and the builder
-and verifier are separate processes, not just separate agents. It never writes
-progress status itself, so the engine's gate/role/dependency rules still gate
-every transition.
+(`/kuru:build`, `/kuru:verify`) — or, for a verified slice, ships it straight to
+`done` itself, since code review is opt-in. It repeats until the board is clear.
+Each step is its own process, so context never accumulates and the builder and
+verifier are separate processes, not just separate agents. It never writes
+progress status itself (the one exception being the verified→done ship), so the
+engine's gate/role/dependency rules still gate every transition.
 
 ### Setup
 
@@ -219,7 +220,7 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 |---|---|---|
 | `--repo` | `.` | Target repo containing `.kuru/`. |
 | `--plugin-dir` | dir of `runner.py` | Where the kuru plugin lives. |
-| `--max-retries` | `2` | Per-slice rejection cap (verifier or review) before it `blocked`s and stops. |
+| `--max-retries` | `2` | Per-slice rejection cap (verifier, or a manual review) before it `blocked`s and stops. |
 | `--max-iters` | `100` | Global safety cap on loop iterations. |
 | `--permission-mode` | `bypassPermissions` | Passed to `claude` per step. |
 | `--settings` / `--allowed-tools` | — | Tighten permissions instead of bypassing. |
@@ -228,16 +229,32 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 
 ## The slice state machine
 
-```
-draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
-                      ^                       |             |
-                      +------- rejected <-----+-------------+   (code review can reject too)
-any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
-any (except done) -> dropped -> draft (resurrect)
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> ready
+    ready --> in_progress
+    in_progress --> built
+    built --> verifying
+    verifying --> verified
+    verifying --> rejected
+    verified --> done: ship (review opt-in)
+    verified --> reviewed: /kuru:review
+    verified --> rejected: review rejects
+    reviewed --> done
+    rejected --> in_progress
+    done --> in_progress: reopen
+    done --> [*]
 ```
 
-A code review that finds real problems rejects the slice (`verified -> rejected`),
-which routes it back to the builder — there is no `verified -> in_progress`.
+Plus two cross-cutting transitions kept off the diagram: **any → blocked** (and
+unblock back to anywhere), and **any-except-done → dropped → draft** (retire a
+slice, resurrect it for a re-write).
+
+**Code review is opt-in.** A verified slice ships straight to `done`; run
+`/kuru:review` by hand on the slices that warrant a closer look. A review that
+finds real problems rejects the slice (`verified -> rejected`), routing it back to
+the builder — there is no `verified -> in_progress`.
 
 A slice that shouldn't be built after all (wrong scope, superseded) is **dropped**
 (`kuru set-status <id> dropped --note "<why>"`) — `next` and the loop ignore it.

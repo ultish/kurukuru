@@ -14,8 +14,10 @@ narration.
 
 ## The pipeline
 
-```
-charter -> prd -> slice -> build -> verify -> review -> done
+```mermaid
+flowchart LR
+    charter --> prd --> slice --> build --> verify --> done
+    verify -. opt-in .-> review --> done
 ```
 
 - **charter** — shared understanding with the humans. Problem, users, success
@@ -30,7 +32,9 @@ charter -> prd -> slice -> build -> verify -> review -> done
   status `built`. (`/kuru:build`, skill `building-a-slice`)
 - **verify** — a SEPARATE `kuru-verifier` subagent gatekeeps against the frozen
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
-- **review** — code review on the diff. (`/kuru:review`)
+- **review** *(opt-in)* — code review on the diff for slices that warrant a closer
+  look. Not a required step: a verified slice ships straight to `done`, and the
+  loop never runs review. (`/kuru:review`)
 
 **Open questions gate the move from charter → PRD → slice.** Ambiguity is cheapest
 to catch at the charter, and must be resolved at the latest in the PRD — *with the
@@ -39,7 +43,7 @@ question is unresolved; slicing freezes the PRD into contracts, so an unanswered
 question becomes a guess locked inside one.
 
 The first three phases need a human. Once every slice has a frozen contract, the
-build → verify → review → done cycle is mechanical and can be driven
+build → verify → done cycle is mechanical and can be driven
 automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,
 spawning a fresh builder and a **separate** verifier per slice, and stops on any
 `blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
@@ -47,17 +51,32 @@ runs charter/PRD/slicing for you.
 
 ## The slice state machine (enforced by kuru.py)
 
-```
-draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
-                      ^                       |             |
-                      +------- rejected <-----+-------------+   (review can reject too)
-any -> blocked -> (unblock anywhere)          done -> in_progress (reopen)
-any (except done) -> dropped -> draft (resurrect)
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> ready
+    ready --> in_progress
+    in_progress --> built
+    built --> verifying
+    verifying --> verified
+    verifying --> rejected
+    verified --> done: ship (review opt-in)
+    verified --> reviewed: /kuru:review
+    verified --> rejected: review rejects
+    reviewed --> done
+    rejected --> in_progress
+    done --> in_progress: reopen
+    done --> [*]
 ```
 
-Both the verifier (`verifying -> rejected`) and code review (`verified ->
-rejected`) send a slice back to the builder. There is no `verified -> in_progress`;
-a failed review rejects, and `rejected -> in_progress` resumes the build.
+Off the diagram: **any → blocked** (unblock back to anywhere) and
+**any-except-done → dropped → draft** (retire/resurrect).
+
+Code review is **opt-in**: a verified slice ships straight to `done`, and the loop
+never reviews. When you do run `/kuru:review`, both the verifier (`verifying ->
+rejected`) and that review (`verified -> rejected`) can send a slice back to the
+builder. There is no `verified -> in_progress`; a failed review rejects, and
+`rejected -> in_progress` resumes the build.
 
 `dropped` retires a slice that should not be built (wrong scope, superseded —
 `kuru set-status <id> dropped --note "<why>"`). `next` and the loop ignore it.

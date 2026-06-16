@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-16
+
+### Changed
+- **Code review is now opt-in instead of a mandatory per-slice step.** The state
+  machine allows `verified → done` directly, and `/kuru:loop` (plus `runner.py`)
+  ships a verified slice straight to `done` via a new inline `ship` action rather
+  than spawning a reviewer for every slice. Run `/kuru:review <id>` by hand on the
+  slices that warrant a closer look — it still does a `/code-review`, marks the
+  slice `reviewed`, and can reject (`verified → rejected`) to send it back to the
+  builder. The `reviewed` status and the verified→reviewed→done detour are
+  unchanged, so existing review workflows keep working. State-machine diagrams in
+  the README and `kuru-method` skill are now Mermaid graphs.
+
 ## [0.3.1] - 2026-06-12
 
 ### Fixed
@@ -220,7 +233,8 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.3.1...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v0.4.0...HEAD
+[0.4.0]: https://example.com/kurukuru/compare/v0.3.1...v0.4.0
 [0.3.1]: https://example.com/kurukuru/compare/v0.3.0...v0.3.1
 [0.3.0]: https://example.com/kurukuru/compare/v0.2.1...v0.3.0
 [0.2.1]: https://example.com/kurukuru/compare/v0.1.3...v0.2.1

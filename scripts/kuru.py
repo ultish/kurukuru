@@ -22,7 +22,8 @@ Usage:
   kuru doctor                       sanity-check the .kuru workspace
 
 Statuses (the slice state machine):
-  draft -> ready -> in_progress -> built -> verifying -> verified -> reviewed -> done
+  draft -> ready -> in_progress -> built -> verifying -> verified -> done
+  verified -> reviewed -> done            (opt-in code review; /kuru:review)
   any -> blocked ;  verifying -> rejected -> in_progress
   any (except done) -> dropped -> draft   (retire a slice; resurrect to re-write it)
 """
@@ -57,7 +58,9 @@ TRANSITIONS = {
     "built": {"verifying", "in_progress", "blocked", "dropped"},
     "verifying": {"verified", "rejected", "blocked", "dropped"},
     "rejected": {"in_progress", "blocked", "dropped"},
-    "verified": {"reviewed", "rejected", "blocked", "dropped"},
+    # Code review is opt-in: a verified slice may ship straight to `done`, or take
+    # the `reviewed` detour via /kuru:review when a slice warrants a closer look.
+    "verified": {"done", "reviewed", "rejected", "blocked", "dropped"},
     "reviewed": {"done", "in_progress", "blocked", "dropped"},
     "done": {"in_progress"},  # reopen; shipped work cannot be dropped
     "blocked": set(STATUSES),  # unblock to anywhere
@@ -158,8 +161,11 @@ STATUS_ACTION = {
     "rejected": "build",
     "in_progress": "build",
     "ready": "build",
-    "verified": "review",
-    "reviewed": "review",    # reviewed but not shipped -> /kuru:review marks it done
+    # Code review is opt-in (run /kuru:review by hand on a verified slice). The
+    # default pipeline ships a verified — or already-reviewed — slice straight to
+    # `done`; `ship` is handled inline by the loop/runner, not a /kuru:* command.
+    "verified": "ship",
+    "reviewed": "ship",
     "draft": "slice",        # needs a human to slice/contract it
 }
 
@@ -358,8 +364,8 @@ def cmd_next(args):
         "rejected": "rejected — back to builder",
         "in_progress": "build in progress",
         "ready": "ready to build",
-        "verified": "ready for code review",
-        "reviewed": "reviewed — mark done once shipped",
+        "verified": "ready to ship (code review optional)",
+        "reviewed": "reviewed — ready to ship",
         "draft": "needs a contract before it can be built",
     }
     s = pick_next(led)

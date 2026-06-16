@@ -11,8 +11,9 @@ status, recommend (and offer to start) the matching command:
 - `ready` → `/kuru:build <id>`.
 - `in_progress` / `rejected` → `/kuru:build <id>` (resume).
 - `built` → `/kuru:verify <id>` (with an independent verifier).
-- `verified` → `/kuru:review <id>`.
-- `reviewed` → `/kuru:review <id>` (marks it `done` once shipped).
+- `verified` → ship it: `set-status <id> done`. Code review is opt-in — offer
+  `/kuru:review <id>` for a closer look, but it isn't required.
+- `reviewed` → ship it: `set-status <id> done`.
 
 If nothing is actionable, say whether everything is `done`/`blocked` and suggest
 `/kuru:slice` or unblocking.

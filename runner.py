@@ -7,7 +7,8 @@ This is the headless counterpart to the in-session `/kuru:loop` command. It runs
 
   1. reads state deterministically from the engine  (`kuru.py next --json`), then
   2. launches a FRESH `claude -p` session for the one step that advances it
-     (`/kuru:build`, `/kuru:verify`, or `/kuru:review`),
+     (`/kuru:build` or `/kuru:verify`) — or, for a verified slice, ships it
+     straight to `done` itself (code review is opt-in: run `/kuru:review` by hand),
 
 repeating until the board is clear. Each step is its own process with its own
 context, so nothing accumulates: builder and verifier are not just separate
@@ -170,10 +171,24 @@ class Runner:
                 print(f"\n⛔ {sid} is a draft and needs human slicing/contracting — run /kuru:slice.")
                 return 1
 
+            if action == "ship":
+                # Code review is opt-in; the default loop ships a verified (or
+                # already-reviewed) slice straight to `done` without spawning a
+                # reviewer. Run /kuru:review by hand for slices that warrant it.
+                print(f"[{i}] {sid} [{status}] -> ship  ({nxt['title']})")
+                self.kuru_run("set-status", sid, "done")
+                print(f"  ✓ {sid} -> done (review skipped — opt-in)")
+                done_count += 1
+                last_key = (sid, status)
+                if self.once:
+                    print("\n(--once) stopping after one step.")
+                    return 0
+                continue
+
             print(f"[{i}] {sid} [{status}] -> {action}  ({nxt['title']})")
 
-            # retry cap on the reject cycle (a slice can be rejected by the verifier
-            # OR by code review — both land in `rejected` and count here).
+            # retry cap on the reject cycle (a slice lands in `rejected` from the
+            # verifier — or from a manual /kuru:review send-back — and counts here).
             if status == "rejected":
                 info = self.kuru_json("show", sid, "--json")
                 if info.get("rejections", 0) >= self.max_retries:
@@ -224,7 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the kuru plugin directory (default: the directory holding this script). "
                         "Set this if you move runner.py out of the plugin repo.")
     p.add_argument("--max-retries", type=int, default=2,
-                   help="per-slice rejection cap (verifier OR review) before blocking (default 2)")
+                   help="per-slice rejection cap (verifier or manual review) before blocking (default 2)")
     p.add_argument("--max-iters", type=int, default=100,
                    help="global safety cap on loop iterations (default 100)")
     p.add_argument("--permission-mode", default="bypassPermissions",

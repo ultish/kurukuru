@@ -1,5 +1,5 @@
 ---
-description: Autonomously run the build→verify→review→done loop over ready slices until the board is clear. Requires charter + PRD + frozen slices to already exist.
+description: Autonomously run the build→verify→done loop over ready slices until the board is clear (code review is opt-in). Requires charter + PRD + frozen slices to already exist.
 argument-hint: "[max-reject-retries, default 2]"
 ---
 
@@ -8,9 +8,11 @@ Use the `kuru-method` skill for context.
 This is the **optional autonomous driver** for the mechanical part of the pipeline.
 The judgment-heavy phases (`/kuru:charter`, `/kuru:prd`, `/kuru:slice`) are done by a
 human first; once every slice has a **frozen contract**, the per-slice
-build → verify → review → done cycle is deterministic enough to loop. The manual
-`/kuru:*` commands still work — this just runs them for you, in `kuru next` order,
-until there is nothing left to do.
+build → verify → done cycle is deterministic enough to loop. **Code review is
+opt-in** — the loop ships a verified slice straight to `done`; run `/kuru:review
+<id>` by hand on the slices that warrant a closer look. The manual `/kuru:*`
+commands still work — this just runs them for you, in `kuru next` order, until
+there is nothing left to do.
 
 `max-reject-retries` (from `$ARGUMENTS`, default **2**) caps how many times a single
 slice may be rejected/sent-back before the loop stops and asks for a human.
@@ -48,8 +50,8 @@ Repeat until a stop condition fires:
    | `ready` / `in_progress` | dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build`) on exactly that slice. |
    | `rejected` | dispatch a **fresh `kuru-builder`**, passing the verifier's rejection note so it fixes the named failures. |
    | `built` | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify`). |
-   | `verified` | run code review (as `/kuru:review`): `/code-review high` on the slice's diff (or, if `/code-review` isn't available, the repo's review skill — at minimum a careful review of the diff for correctness/security). Clean → `set-status <id> reviewed --by reviewer` then `set-status <id> done`. Real problems found → treat as a send-back (see retry rule) and `set-status <id> rejected --by reviewer --note "<what to fix>"` (the engine allows `verified → rejected`, **not** `verified → in_progress`; from `rejected` the slice flows back to the builder and the rejection is counted toward the retry cap). |
-   | `reviewed` | reviewed in a prior session but not shipped → `set-status <id> done`. |
+   | `verified` | **ship it** — `set-status <id> done`. Code review is opt-in and the loop does **not** run it. (Slices you want reviewed: run `/kuru:review <id>` by hand before/instead of looping, or pause the loop for them.) |
+   | `reviewed` | reviewed by hand in a prior session but not shipped → `set-status <id> done`. |
 
 5. After each transition, briefly note progress, then loop.
 
@@ -62,7 +64,7 @@ Repeat until a stop condition fires:
   the builder's context to verify.
 - **Cap the send-back cycle.** Before (re)building a `rejected` slice, read its
   history (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" show <id>`) and count how
-  many times it has been `rejected` (or sent back by review). If that count ≥
+  many times it has been `rejected` (by the verifier, or by a manual review). If that count ≥
   `max-reject-retries`, STOP: `set-status <id> blocked --note "exceeded N
   build/verify retries: <last failure>"` and hand to a human. Do not spin forever.
 - **`blocked` means stop, not skip.** If a builder or verifier sets a slice
