@@ -16,7 +16,7 @@ Do NOT rely on anything from earlier chat; reconstruct state from files:
    uncommitted changes.
 5. For the slice `next` points at, read its `slice.md` / `contract.yml` and its
    latest history note.
-6. Skim the Technical environment in `.kuru/charter.md` (and `.kuru/profile.json`
+6. Skim the Technical environment in `.kuru/charter.md` (and `.kuru/profiles/`
    if present) so you know the stack, deploy target, and any air-gap constraints
    before you touch anything.
 

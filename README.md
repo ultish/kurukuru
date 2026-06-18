@@ -122,10 +122,17 @@ rejections. The manual `/kuru:*` commands still work alongside either.
 ### Environment profiles (reuse a stack across projects)
 
 If you spin up many projects with the same stack — especially in an **air-gapped**
-org — save a reusable **profile** and pass it to `init`:
+org — save a reusable, **single-stack profile** and pass it to `init`. `--profile`
+is **repeatable**, so keep one file per build flavour and pass the relevant ones:
 
 ```bash
+# single-app repo
 python3 /path/to/kuru/scripts/kuru.py init --profile ~/.kuru/profiles/gradle-kube.json
+
+# polyglot/monorepo — pass a catalog; the charter picks what applies
+python3 /path/to/kuru/scripts/kuru.py init \
+  --profile ~/.kuru/profiles/gradle-kube.json \
+  --profile ~/.kuru/profiles/pnpm-web.json
 ```
 
 A profile is plain JSON you keep **outside the plugin** (see
@@ -134,7 +141,7 @@ A profile is plain JSON you keep **outside the plugin** (see
 - `stack` — a gate preset (`node|pnpm|gradle|maven|go|python|cargo`) used to seed
   the initial `config.json` at `init`,
 - `config` — suggested gate commands (e.g. gradle `--offline` against an internal
-  mirror) that `/kuru:charter` uses as a **starting point**, and
+  mirror) that `/kuru:charter` uses as a **starting point** for this flavour's gates,
 - `environment` — language/version, deploy target, and **internal registry
   endpoints** that pre-fill the charter's Technical environment so you don't
   re-type them each time, and
@@ -144,14 +151,18 @@ A profile is plain JSON you keep **outside the plugin** (see
   `setup-conformance` gate so a builder that ignores the rule fails a gate, not just a
   reviewer's patience; judgmental ones become acceptance criteria.
 
-The profile is **guidance, not gospel**. `init` seeds a starting `config.json` from
-`stack` (or the node default) and stashes the profile at `.kuru/profile.json`. Then
-`/kuru:charter` reads it, **summarizes it back to you, hunts for gaps to confirm**,
-writes the authoritative `config.json` (including any `setup-conformance` gate
-distilled from `conventions`), and folds the rest (endpoints, deploy target,
-required tooling) into the charter — rather than applying any of it verbatim. Internal
-endpoints you'd rather not commit can be left out of the profile and supplied at the
-end of the charter (which lets you skip them for later).
+The profiles are **guidance, not gospel**, and a **catalog**: pass several and
+`/kuru:charter` picks the ones matching the apps it discovers in this repo (a Kotlin
+service → the gradle profile; a web app → the pnpm profile), assigns each a gate
+**target** + `dir`, and ignores the rest. `init` seeds a starting `config.json` (from
+a lone profile's `stack`, else the node default) and stashes the profiles under
+`.kuru/profiles/`. Then `/kuru:charter` reads them, **summarizes back to you, hunts
+for gaps to confirm** (including each app's `dir`), writes the authoritative
+`config.json` (a flat gate set, or a per-app `targets` map — see [Multiple build
+targets](#multiple-build-targets-monorepo--polyglot)), and folds the rest (endpoints,
+deploy target, required tooling) into the charter — rather than applying any of it
+verbatim. Internal endpoints you'd rather not commit can be left out of the profile
+and supplied during the charter.
 
 ### Dependencies between slices
 
@@ -160,6 +171,32 @@ engine then **refuses to start** a slice (`ready → in_progress`) until every
 dependency is `done`, and `kuru next` skips dependency-blocked slices — so the
 loop builds in a safe order. (Parallel building of independent slices is a planned
 upgrade.)
+
+### Multiple build targets (monorepo / polyglot)
+
+One repo, several apps with different pipelines — say a gradle/kotlin service and a
+pnpm web app — don't share one gate set. Define a **gate target per app** in
+`config.json`, each with its own working `dir` and `gates`:
+
+```json
+{
+  "project": "my-monorepo",
+  "targets": {
+    "api": { "dir": "services/api", "gates": { "build": { "cmd": "./gradlew :api:build", "required": true, "timeout": 1800 } } },
+    "web": { "dir": "apps/web",     "gates": { "lint":  { "cmd": "pnpm lint",          "required": true, "timeout": 600  } } }
+  }
+}
+```
+
+Targets are discovered and written during `/kuru:charter` (seed each with
+`kuru set-stack gradle --target api`, then set its `dir`); each slice declares its
+app at `/kuru:slice` time (`kuru new-slice "…" --target web`, or `kuru set-target
+<id> web` after). `kuru gate <id>` then runs **only that target's gates, in that
+target's dir** — the JS slice never runs `./gradlew`. `kuru doctor` flags a slice
+that has no target once more than one exists.
+
+A single-app repo needs none of this: a flat top-level `gates` keeps working and is
+treated as one implicit `default` target at the repo root.
 
 ## Running headless (`runner.py`)
 
@@ -255,6 +292,12 @@ slice, resurrect it for a re-write).
 `/kuru:review` by hand on the slices that warrant a closer look. A review that
 finds real problems rejects the slice (`verified -> rejected`), routing it back to
 the builder — there is no `verified -> in_progress`.
+
+**Reaching `done` auto-commits.** Whatever path a slice takes to `done`, the engine
+commits the working tree as one slice-sized commit — the code, the `.kuru/`
+artifacts, and the ledger transition together (`kuru: ship <id> — <title>`). It's
+best-effort: outside a git repo, or if `git commit` fails (no identity, a rejecting
+hook), the slice still lands `done` and the engine just warns.
 
 A slice that shouldn't be built after all (wrong scope, superseded) is **dropped**
 (`kuru set-status <id> dropped --note "<why>"`) — `next` and the loop ignore it.

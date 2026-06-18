@@ -1,6 +1,6 @@
 {
   "project": "{{PROJECT}}",
-  "_help": "Gradle (Kotlin/Java) preset via the wrapper. Gates run in the repo root. Swap task names for what this build uses (ktlintCheck/detekt/spotlessCheck for lint; check covers verification). Air-gapped: add --offline once the Gradle cache + your internal Maven mirror are populated, and point settings.gradle(.kts)/init.gradle at the mirror.",
+  "_help": "Gradle (Kotlin/Java) preset via the wrapper. Gates run in its target's dir (the repo root for a single-app config). Swap task names for what this build uses (ktlintCheck/detekt/spotlessCheck for lint; check covers verification). Air-gapped: add --offline once the Gradle cache + your internal Maven mirror are populated, and point settings.gradle(.kts)/init.gradle at the mirror.",
   "gates": {
     "lint":  { "cmd": "./gradlew --console=plain check -x test", "required": false, "timeout": 900 },
     "unit":  { "cmd": "./gradlew --console=plain test",          "required": true,  "timeout": 1800 },

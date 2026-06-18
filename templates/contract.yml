@@ -18,8 +18,10 @@ acceptance_criteria:
   #   kind: observed
   #   evidence_required: "..."
 
-# Gates are global, not per-slice: `kuru gate` runs EVERY gate in .kuru/config.json,
-# and all required ones must be green before this slice can become verified.
+# Gates are not declared per-slice: `kuru gate` runs the gates from .kuru/config.json,
+# and all required ones must be green before this slice can become verified. In a
+# multi-app repo that's this slice's target's gates (set via `--target`), run in the
+# target's dir; a single-app repo just runs its one flat gate set.
 
 out_of_scope:
   - "REPLACE: things explicitly NOT in this slice, so the verifier doesn't fail it for them."

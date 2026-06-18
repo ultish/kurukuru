@@ -16,6 +16,7 @@ Resolve the target: `$ARGUMENTS` if given, else the first slice in status
 shipped), don't re-review — just mark it done once it's merged/shipped per your
 process:
 `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> done` — and stop here.
+(Marking a slice `done` auto-commits the working tree as one slice-sized commit.)
 
 A `verified` slice reaches here after independent verification. Run the project's
 code review on this slice's diff at high effort — invoke `/code-review high` (or

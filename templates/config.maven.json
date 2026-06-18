@@ -1,6 +1,6 @@
 {
   "project": "{{PROJECT}}",
-  "_help": "Maven (Java) preset. Gates run in the repo root. Swap the lint goal for the checkstyle/spotbugs/pmd plugin you use. Air-gapped: add -o (offline) once your local repo + internal mirror (settings.xml) are populated.",
+  "_help": "Maven (Java) preset. Gates run in its target's dir (the repo root for a single-app config). Swap the lint goal for the checkstyle/spotbugs/pmd plugin you use. Air-gapped: add -o (offline) once your local repo + internal mirror (settings.xml) are populated.",
   "gates": {
     "lint":  { "cmd": "mvn -q -DskipTests checkstyle:check", "required": false, "timeout": 900 },
     "unit":  { "cmd": "mvn -q test",                          "required": true,  "timeout": 1800 },

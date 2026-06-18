@@ -1,6 +1,6 @@
 ---
 description: Scaffold a Kurukuru workspace (.kuru/) in the current repo.
-argument-hint: "[--stack node|pnpm|python|go|gradle|maven|cargo] [--profile FILE] [--force]"
+argument-hint: "[--stack node|pnpm|python|go|gradle|maven|cargo] [--profile FILE ...] [--force]"
 ---
 
 Use the `kuru-method` skill for context.
@@ -15,7 +15,9 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
 
 1. **Parse $ARGUMENTS** for known flags:
    - `--stack <tool>` — one of `node` `pnpm` `python` `go` `gradle` `maven` `cargo`
-   - `--profile <path>` — path to a reusable environment profile JSON
+   - `--profile <path>` — path to a reusable single-stack environment profile JSON.
+     **Repeatable**: pass several (a catalog) for a polyglot/monorepo and
+     `/kuru:charter` matches each to an app. Stashed under `.kuru/profiles/`.
    - `--force` — re-scaffold files even if `.kuru/` already exists
 
 2. **Check if `.kuru/` already exists.** If it does and `--force` was not passed,
@@ -24,10 +26,10 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
 3. **Build the command** from the parsed flags and run it:
 
    ```
-   python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init [--stack STACK] [--profile PROFILE] [--force]
+   python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init [--stack STACK] [--profile P1 --profile P2 ...] [--force]
    ```
 
-   Only include a flag if the user supplied it.
+   Only include a flag if the user supplied it; repeat `--profile` once per file.
 
 4. **Show the output** verbatim so the user can see what was created.
 

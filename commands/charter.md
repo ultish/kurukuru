@@ -60,19 +60,27 @@ deploy, and it drives `.kuru/config.json`. The fields to establish:
   - **Judgmental** (e.g. "layout follows the reference project") → it stays a
     convention the slicer turns into an acceptance criterion the verifier checks.
 
-**If `.kuru/profile.json` exists** (the user ran `kuru init --profile <file>`),
-treat it as **guidance, not gospel** — it's a head start on the fields above, not a
+**If `.kuru/profiles/` holds any profiles** (the user ran `kuru init --profile
+<file>` one or more times), treat them as a **catalog of guidance, not gospel** —
+each is one single-stack flavor (a gradle profile, a pnpm profile, …), and the user
+may have passed more than apply here. It's a head start on the fields above, not a
 finished answer:
-1. Read it and **summarize back to the user** what it implies for each field above
+1. **Match profiles to the apps in this repo.** From what the user describes, decide
+   which profile(s) apply: a Kotlin/JVM service → the gradle profile; a web app →
+   the pnpm profile. A repo with one app uses one profile (single-app, flat
+   `config.json`); a polyglot repo uses several, one **gate target** per app (see the
+   monorepo section below). Profiles that match nothing are ignored — say so.
+2. For each matched profile, **summarize back to the user** what it implies
    (language/version, build tool, deploy env, air-gap endpoints, reference project,
-   any `config` gate commands, and any `conventions` it carries — the required
+   its `config` gate commands, and any `conventions` it carries — the required
    tooling/skills and their checkable artifacts).
-2. **Hunt for gaps** — fields the profile leaves blank, stale, or ambiguous for
-   *this* project — and ask the user only those (use `AskUserQuestion`). Confirm the
-   pre-filled values rather than assuming them. For each `conventions` entry, confirm
-   the rule **and** pin down its checkable artifact if the profile didn't state one —
-   a convention with no checkable outcome can't be enforced downstream.
-Otherwise (no profile), ask the whole group as one `AskUserQuestion` batch.
+3. **Hunt for gaps** — fields a profile leaves blank, stale, or ambiguous for *this*
+   project, and the per-app **dir** the profile can't know — and ask the user only
+   those (use `AskUserQuestion`). Confirm the pre-filled values rather than assuming
+   them. For each `conventions` entry, confirm the rule **and** pin down its checkable
+   artifact if the profile didn't state one — a convention with no checkable outcome
+   can't be enforced downstream.
+Otherwise (no profiles), ask the whole group as one `AskUserQuestion` batch.
 
 Write/update `.kuru/charter.md` (use its template sections, including **Technical
 environment**), folding in every answer — including the air-gap endpoints and any
@@ -97,13 +105,43 @@ authoritative gate config gets set — the profile only informed it:
    `test -f gradle/libs.versions.toml && grep -q nexus.internal settings.gradle.kts && ! grep -q repo.maven.apache.org settings.gradle.kts`.
    Make it `required` with a short timeout. Two rules: it must be a **cheap check
    (grep/test), never a rebuild** — the `build` gate already owns the expensive
-   offline-assemble — and it runs on **every** slice (gates are global), which is
+   offline-assemble — and it runs on **every** slice that uses its gate set, which is
    correct: these are invariants, so it doubles as a regression guard. Do NOT wire it
-   to read `profile.json`; the profile is guidance, this gate is the authoritative,
+   to read the profiles; a profile is guidance, this gate is the authoritative,
    executable form. Omit the gate if no convention is deterministically checkable.
 4. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 If the build pipeline isn't a preset, write the gates by hand to match how this
 repo actually typechecks / lints / tests / builds.
+
+**Multiple apps / build flavors in one repo (monorepo).** If the charter reveals
+more than one build pipeline — e.g. a gradle/kotlin service in `services/api` and a
+pnpm web app in `apps/web` — do **not** force one global gate set. Define a **gate
+target per app** in `config.json`: each target has its own working `dir` and `gates`
+(and its own `setup-conformance` invariant). Seed each from its preset without
+clobbering the others, then set each `dir` and tailor:
+```
+python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack gradle --target api
+python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack pnpm   --target web
+```
+which yields:
+```json
+{ "project": "mono",
+  "targets": {
+    "api": { "dir": "services/api", "gates": { "build": { "cmd": "./gradlew :api:build", "required": true, "timeout": 1800 } } },
+    "web": { "dir": "apps/web",     "gates": { "lint": { "cmd": "pnpm lint", "required": true, "timeout": 600 } } }
+  } }
+```
+Each slice then declares which target it belongs to (the `/kuru:slice` step assigns
+it with `--target`), and `kuru gate <id>` runs **only that target's gates, in that
+target's dir**. A single-app repo needs none of this — a flat top-level `gates`
+still works and behaves as one implicit target. `kuru doctor` flags a slice with no
+target once more than one target exists.
+
+When `.kuru/profiles/` holds several profiles, each **matched** profile becomes one
+target: its `stack`/`config` seeds that target's gates, you ask the user for its
+`dir` (the profile can't know where the app lives in this repo), and its
+`environment`/`conventions` fold into the charter as that app's section. As with
+everything else in a profile, it's guidance, not gospel.
 
 **Resolve open questions here — don't punt them downstream.** The charter is the
 cheapest place to catch ambiguity. Before you finish, review the **Open questions**

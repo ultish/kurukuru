@@ -50,8 +50,8 @@ Repeat until a stop condition fires:
    | `ready` / `in_progress` | dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build`) on exactly that slice. |
    | `rejected` | dispatch a **fresh `kuru-builder`**, passing the verifier's rejection note so it fixes the named failures. |
    | `built` | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify`). |
-   | `verified` | **ship it** — `set-status <id> done`. Code review is opt-in and the loop does **not** run it. (Slices you want reviewed: run `/kuru:review <id>` by hand before/instead of looping, or pause the loop for them.) |
-   | `reviewed` | reviewed by hand in a prior session but not shipped → `set-status <id> done`. |
+   | `verified` | **ship it** — `set-status <id> done` (this auto-commits the slice: code + `.kuru/` artifacts + ledger, as one commit). Code review is opt-in and the loop does **not** run it. (Slices you want reviewed: run `/kuru:review <id>` by hand before/instead of looping, or pause the loop for them.) |
+   | `reviewed` | reviewed by hand in a prior session but not shipped → `set-status <id> done` (auto-commits, as above). |
 
 5. After each transition, briefly note progress, then loop.
 

@@ -1,6 +1,6 @@
 {
   "project": "{{PROJECT}}",
-  "_help": "Rust + Cargo preset. Gates run in the repo root. Air-gapped: vendor crates (cargo vendor) and point .cargo/config.toml at the vendored/offline source; then builds need no network.",
+  "_help": "Rust + Cargo preset. Gates run in its target's dir (the repo root for a single-app config). Air-gapped: vendor crates (cargo vendor) and point .cargo/config.toml at the vendored/offline source; then builds need no network.",
   "gates": {
     "typecheck": { "cmd": "cargo check",                "required": true,  "timeout": 900 },
     "lint":      { "cmd": "cargo clippy -- -D warnings", "required": false, "timeout": 900 },

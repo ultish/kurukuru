@@ -25,6 +25,11 @@ For each agreed slice:
    (add `--depends-on SL-000X,SL-000Y` for any slice that must wait on earlier
    ones — the engine then refuses to start it until those are `done`, and orders
    the loop safely. Sequence the walking-skeleton slice first, with no deps.)
+   **If `config.json` defines multiple gate targets** (a monorepo with several
+   apps), add `--target <name>` to say which app this slice belongs to — that
+   decides which gates run, and in which directory. The PRD already says which app
+   each piece of work touches, so you know this up front; `kuru doctor` flags a
+   slice that forgot its target. (Single-target repos need no `--target`.)
 2. Fill its `slice.md` (goal, why-one-slice, inline context, in/out of scope,
    dependencies, numbered acceptance criteria).
 3. Fill its `contract.yml` (done_definition, acceptance_criteria with

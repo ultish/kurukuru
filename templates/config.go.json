@@ -1,6 +1,6 @@
 {
   "project": "{{PROJECT}}",
-  "_help": "Go preset (go vet / go test / go build, plus a gofmt check). Each gate runs in the repo root; every required gate must exit 0 before a slice can be marked verified. Adjust targets to match this repo; swap the lint gate for golangci-lint if you use it.",
+  "_help": "Go preset (go vet / go test / go build, plus a gofmt check). Each gate runs in its target's dir (the repo root for a single-app config); every required gate must exit 0 before a slice can be marked verified. Adjust targets to match this repo; swap the lint gate for golangci-lint if you use it.",
   "gates": {
     "fmt":   { "cmd": "test -z \"$(gofmt -l .)\"", "required": false, "timeout": 300 },
     "vet":   { "cmd": "go vet ./...",              "required": true,  "timeout": 600 },

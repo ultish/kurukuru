@@ -2,6 +2,11 @@
 
 _Epic: {{EPIC}} · Created {{DATE}}_
 
+<!-- Monorepo only: if config.json defines multiple gate targets, this slice's
+target (which app it builds, hence which gates run and in which dir) is set with
+`kuru new-slice --target <name>` / `kuru set-target {{ID}} <name>`. Single-app
+repos ignore this. -->
+
 > **Frozen at status `ready`.** Once this slice is `ready`, the contract below is
 > locked. A scope change means a NEW slice or an explicit re-`draft` — never
 > silent drift during a build.

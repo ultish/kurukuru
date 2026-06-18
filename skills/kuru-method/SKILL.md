@@ -125,6 +125,13 @@ Four rules are enforced **in code** — you cannot talk your way past them:
 
 Never hand-edit `ledger.json` or `gate-results.json`. Use kuru subcommands.
 
+**Gate targets (monorepo).** `config.json` holds the gates. A single-app repo uses
+a flat top-level `gates`. A repo with several apps/build flavors uses a `targets`
+map — one entry per app, each with its own working `dir` and `gates` — and every
+slice carries a `target` (set at `/kuru:slice`). `kuru gate <id>` then runs only
+that target's gates, in that target's dir. A flat config behaves as one implicit
+`default` target, so nothing changes for single-app repos.
+
 ## kuru.py command reference
 
 Invoke as `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>`.
@@ -142,13 +149,14 @@ repo, so resolve its path in this order:
 
 | Command | Effect |
 |---|---|
-| `init [--force] [--stack <tool>] [--profile FILE]` | Scaffold `.kuru/` (optionally from a build-tool preset or a reusable env profile). |
-| `set-stack <tool>` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. |
-| `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..]` | Create `SL-NNNN` + artifacts; status `draft`. |
+| `init [--force] [--stack <tool>] [--profile FILE ...]` | Scaffold `.kuru/` (optionally from a build-tool preset, or one or more reusable env profiles — repeatable, stashed under `.kuru/profiles/` as a catalog the charter matches to apps). |
+| `set-stack <tool> [--target N]` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. With `--target`, seed/replace just that one gate target (monorepo), preserving the others. |
+| `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..] [--target N]` | Create `SL-NNNN` + artifacts; status `draft`. `--target` binds it to a `config.json` gate target (monorepo). |
+| `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
 | `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
 | `next [--json]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). |
-| `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer]` | Guarded transition. |
-| `gate <id>` | Run config gates; write `gate-results.json`; non-zero on fail. |
+| `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. |
+| `gate <id>` | Run the slice's gates; write `gate-results.json`; non-zero on fail. In a multi-target repo, runs only the slice's target's gates, in that target's `dir`. |
 | `check <id>` | Read-only: may this slice reach `verified`? |
 | `doctor` | Validate the workspace. |

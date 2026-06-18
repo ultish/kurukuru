@@ -109,6 +109,15 @@ acceptance criteria are **locked**. If you discover the scope was wrong:
 Never let a builder silently change the contract to match what it built — that's
 the exact drift this harness exists to prevent.
 
+## Assign a gate target (monorepo only)
+If `config.json` defines multiple gate targets — one per app/build flavor in the
+repo (a gradle service, a pnpm web app) — each slice must say which one it builds,
+because that decides **which gates run and in which directory**. You know this up
+front: the charter defined the targets and the PRD says which app each piece of
+work touches. Pass it at creation: `kuru new-slice "<title>" --target web` (or fix
+later with `kuru set-target <id> <name>`). A slice that forgets its target is caught
+by `kuru doctor` and can't be gated. Single-target repos ignore this entirely.
+
 ## Worked example
 PRD: "Users can save and revisit search filters."
 

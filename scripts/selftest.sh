@@ -24,8 +24,23 @@ expect_fail() {
   case "$out" in *"$sub"*) ok "$d" ;; *) fail "$d (missing '$sub' in: $out)" ;; esac
 }
 
-newrepo() { local d; d="$(mktemp -d)"; cd "$d" || exit 1; git init -q 2>/dev/null || true; echo "$d"; }
+newrepo() {
+  local d; d="$(mktemp -d)"; cd "$d" || exit 1
+  if git init -q 2>/dev/null; then
+    # a local identity so the auto-commit-on-done can actually commit in CI
+    git config user.email kuru@test.local; git config user.name "kuru test"
+  fi
+  echo "$d"
+}
 trivial_gates() { printf '{"project":"t","gates":{"unit":{"cmd":"true","required":true,"timeout":60}}}\n' > .kuru/config.json; }
+# drive a fresh slice all the way to `verified` (gates green); leaves cwd in the repo
+drive_to_verified() {
+  $KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+  $KURU set-status SL-0001 built --by builder >/dev/null
+  $KURU set-status SL-0001 verifying --by verifier >/dev/null
+  $KURU gate SL-0001 >/dev/null 2>&1
+  $KURU set-status SL-0001 verified --by verifier >/dev/null
+}
 
 echo "== SL-1: init + new-slice scaffold =="
 newrepo >/dev/null
@@ -71,14 +86,16 @@ expect_fail "set-stack unknown preset errors" "missing template" $KURU set-stack
 
 echo "== init --profile: reusable environment profile (guidance, not gospel) =="
 newrepo >/dev/null
-prof="$(mktemp)"
+prof="$(mktemp -d)/gradle-kube.json"
 printf '{"stack":"gradle","config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}},"environment":{"language":"Kotlin/JDK21"}}\n' > "$prof"
 expect_ok "init --profile (config is guidance only)" $KURU init --profile "$prof"
 # init seeds config.json from the profile's STACK preset (gradle), NOT from its
 # `config` block verbatim — that block is guidance for /kuru:charter to apply later.
 grep -q "gradlew" .kuru/config.json && ok "config seeded from profile stack preset" || fail "stack preset not seeded"
 grep -q "gradlew test" .kuru/config.json && fail "profile config applied verbatim (should be guidance only)" || ok "profile config NOT applied verbatim (charter's job)"
-[ -f .kuru/profile.json ] && grep -q "Kotlin/JDK21" .kuru/profile.json && ok "profile stashed to .kuru/profile.json for charter" || fail "profile.json missing"
+# a single profile is stashed under .kuru/profiles/<stem>.json for the charter
+[ -f ".kuru/profiles/gradle-kube.json" ] && grep -q "Kotlin/JDK21" ".kuru/profiles/gradle-kube.json" \
+  && ok "profile stashed under .kuru/profiles/ for charter" || fail "profile not stashed under .kuru/profiles/"
 python3 -c "import json;assert json.load(open('.kuru/config.json'))['project']" && ok "seeded config got a project name" || fail "no project in config"
 newrepo >/dev/null
 printf '{"stack":"pnpm"}\n' > "$prof"
@@ -89,6 +106,18 @@ newrepo >/dev/null
 printf '{"config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}}}\n' > "$prof"
 expect_ok "init --profile (config only, no stack)" $KURU init --profile "$prof"
 grep -q "npm " .kuru/config.json && ok "config-only profile falls back to node default seed" || fail "config-only profile didn't fall back to node"
+# REPEATABLE --profile: a catalog of single-stack profiles for a polyglot repo. Both
+# are stashed for the charter to match to apps; with >1 profile init seeds the node
+# default (the charter, not init, decides which apply and to which dir).
+newrepo >/dev/null
+pg="$(mktemp -d)/gradle-svc.json"; pw="$(mktemp -d)/pnpm-web.json"
+printf '{"stack":"gradle","environment":{"language":"Kotlin"}}\n' > "$pg"
+printf '{"stack":"pnpm","environment":{"language":"TypeScript"}}\n' > "$pw"
+expect_ok "init with multiple --profile (catalog)" $KURU init --profile "$pg" --profile "$pw"
+[ -f .kuru/profiles/gradle-svc.json ] && [ -f .kuru/profiles/pnpm-web.json ] \
+  && ok "every profile stashed under .kuru/profiles/" || fail "not all profiles stashed"
+grep -q "npm " .kuru/config.json && ok "multi-profile init seeds the node default (charter composes targets)" || fail "multi-profile seed wrong"
+expect_ok "doctor healthy after a multi-profile init" $KURU doctor
 
 echo "== SL-2: status + gate enforcement =="
 newrepo >/dev/null
@@ -145,6 +174,84 @@ nx="$($KURU next --json)"
 echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
   && ok "verified slice surfaces via next (action ship)" || fail "verified not shippable: $nx"
 expect_ok "verified->done allowed directly (review opt-in)" $KURU set-status SL-0001 done
+
+echo "== auto-commit: marking a slice done commits the working tree =="
+newrepo >/dev/null; repo="$(pwd)"
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "auto commit me" >/dev/null
+echo "feature code" > feature.txt
+drive_to_verified
+before="$(git -C "$repo" rev-list --count HEAD 2>/dev/null || echo 0)"
+out="$($KURU set-status SL-0001 done 2>&1)"
+echo "$out" | grep -q "committed" && ok "set-status done reports a commit" || fail "no commit reported: $out"
+after="$(git -C "$repo" rev-list --count HEAD)"
+[ "$after" -gt "$before" ] && ok "a new commit exists after done ($before -> $after)" || fail "commit count did not grow"
+git -C "$repo" log -1 --pretty=%s | grep -q "ship SL-0001" && ok "commit subject names the slice" || fail "commit subject wrong"
+# the feature file and the .kuru ledger transition are captured in that commit
+git -C "$repo" show --stat HEAD | grep -q "feature.txt" && ok "slice code is in the commit" || fail "feature.txt not committed"
+[ -z "$(git -C "$repo" status --porcelain)" ] && ok "working tree clean after auto-commit" || fail "tree dirty after commit"
+
+echo "== auto-commit: non-git dir degrades gracefully (no crash) =="
+d="$(mktemp -d)"; cd "$d"
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+drive_to_verified
+expect_ok "set-status done succeeds without a git repo" $KURU set-status SL-0001 done
+
+echo "== targets: per-app gate sets run in their own dir =="
+newrepo >/dev/null
+$KURU init >/dev/null
+mkdir -p services/api apps/web
+# api gate passes only if run in services/api; web gate only in apps/web
+printf '{"project":"mono","targets":{"api":{"dir":"services/api","gates":{"build":{"cmd":"test -f here-api","required":true,"timeout":60}}},"web":{"dir":"apps/web","gates":{"lint":{"cmd":"test -f here-web","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+touch services/api/here-api apps/web/here-web
+$KURU new-slice "api thing" --target api >/dev/null
+$KURU new-slice "web thing" --target web >/dev/null
+expect_ok "doctor healthy with multiple targets" $KURU doctor
+$KURU ls | grep -q "TARGET" && ok "ls shows a TARGET column when slices are targeted" || fail "no TARGET column"
+$KURU next --json | grep -q '"target": "api"' && ok "next --json carries the slice target" || fail "next missing target"
+# SL-0001 (api): its build gate is `test -f here-api`, which only passes in services/api
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null
+g="$($KURU gate SL-0001 2>&1)"
+echo "$g" | grep -q "target: api" && ok "gate names the resolved target" || fail "gate target label missing: $g"
+echo "$g" | grep -q "services/api" && ok "gate runs in the target's dir" || fail "gate cwd wrong: $g"
+$KURU show SL-0001 --json | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d['gate']['target']=='api' and d['gate']['passed'] else 1)" \
+  && ok "api gate passed in its own dir (and recorded target)" || fail "api gate did not pass in services/api"
+# a web slice's gate (test -f here-web) would FAIL if run in the repo root; it passes only in apps/web
+$KURU set-status SL-0002 ready >/dev/null; $KURU set-status SL-0002 in_progress >/dev/null
+$KURU set-status SL-0002 built --by builder >/dev/null; $KURU gate SL-0002 >/dev/null 2>&1
+$KURU show SL-0002 --json | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d['gate']['passed'] else 1)" \
+  && ok "web gate passed in apps/web (proves per-target scoping)" || fail "web gate failed — scoping wrong"
+
+echo "== targets: validation + set-target + back-compat =="
+newrepo >/dev/null
+$KURU init >/dev/null
+mkdir -p services/api apps/web
+printf '{"project":"mono","targets":{"api":{"dir":"services/api","gates":{"build":{"cmd":"true","required":true,"timeout":60}}},"web":{"dir":"apps/web","gates":{"lint":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+expect_fail "new-slice rejects an unknown target" "unknown target" $KURU new-slice "x" --target nope
+$KURU new-slice "untargeted" >/dev/null   # no --target while multiple targets exist
+expect_fail "doctor flags an untargeted slice when several targets exist" "no target" $KURU doctor
+expect_fail "gate refuses a slice with no resolvable target" "no target" $KURU gate SL-0001
+expect_ok "set-target assigns a valid target" $KURU set-target SL-0001 web
+expect_fail "set-target rejects an unknown target" "unknown target" $KURU set-target SL-0001 bogus
+expect_ok "doctor healthy once the slice is targeted" $KURU doctor
+# top-level gates alongside targets is flagged as ignored
+printf '{"project":"mono","gates":{"unit":{"cmd":"true"}},"targets":{"api":{"dir":".","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+expect_fail "doctor flags top-level gates shadowed by targets" "ignored" $KURU doctor
+# back-compat: a flat (no-targets) config still works as a single 'default' target
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null
+expect_ok "flat config still gates (single default target)" $KURU gate SL-0001
+$KURU show SL-0001 --json | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['gate']['target']=='default' else 1)" \
+  && ok "flat config resolves to the 'default' target" || fail "flat config target wrong"
+# set-stack --target seeds one target without clobbering the other
+newrepo >/dev/null
+$KURU init >/dev/null
+$KURU set-stack node --target web >/dev/null
+$KURU set-stack go --target api >/dev/null
+python3 -c "import json,sys; t=json.load(open('.kuru/config.json'))['targets']; sys.exit(0 if set(t)=={'web','api'} else 1)" \
+  && ok "set-stack --target keeps both targets (no clobber)" || fail "set-stack --target clobbered a target"
 
 echo "== reviewed: a reviewed-but-unshipped slice is visible to next (action=ship) =="
 newrepo >/dev/null

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-18
+
+### Added
+- **A slice auto-commits when it reaches `done`.** `set-status <id> done` (the
+  single chokepoint every path — loop, runner, `/kuru:review`, manual — flows
+  through) now commits the working tree as one atomic commit: the slice's code, its
+  `.kuru/` artifacts, and the ledger transition together, with the message
+  `kuru: ship <id> — <title>`. Best-effort: if the repo isn't a git work tree,
+  there's nothing to commit, or `git commit` fails (no identity, a rejecting hook),
+  it warns and leaves the slice `done` rather than erroring.
+- **Per-app gate targets (monorepo / polyglot support).** `config.json` can now
+  define a `targets` map — one entry per app/build flavor, each with its own working
+  `dir` and `gates` (e.g. a gradle service in `services/api`, a pnpm app in
+  `apps/web`). Each slice is bound to a target (`new-slice --target` / new
+  `set-target <id> <name>`), and `kuru gate <id>` runs **only that target's gates,
+  in that target's dir** — no more running `./gradlew` against a JS slice.
+  `set-stack <tool> --target <name>` seeds one target without clobbering the others;
+  `doctor` validates target dirs and flags a slice that has no target when several
+  exist; `ls`/`next` surface the target. Fully backward compatible: a flat top-level
+  `gates` is treated as a single implicit `default` target at the repo root, so
+  single-app configs are unchanged. Targets are defined in `/kuru:charter` and
+  assigned in `/kuru:slice`.
+- **`init --profile` is repeatable — environment profiles are now a catalog.** Pass
+  several single-stack profiles (`init --profile gradle-kube.json --profile
+  pnpm-web.json`); they're stashed under `.kuru/profiles/`, and `/kuru:charter`
+  matches each to an app it discovers in the repo, assigns it a gate target + dir,
+  and folds its environment/conventions in per app. Profiles that match nothing are
+  ignored. (A single profile still seeds its stack preset at init, as before.)
+
+### Changed
+- **Profiles are stashed under `.kuru/profiles/` (was `.kuru/profile.json`)** and no
+  longer carry a `targets` block — each profile is one single-stack build flavor,
+  and the charter composes targets from the matched set.
+
+### Fixed
+- **`new-slice` validates before it writes.** Invalid args (e.g. an unknown
+  `--target`) are now rejected before the slice directory is created, so a failed
+  `new-slice` no longer leaves an orphan `SL-NNNN/` dir that collides with the next
+  id.
+
 ## [0.4.0] - 2026-06-16
 
 ### Changed
@@ -233,7 +273,8 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.4.0...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v0.5.0...HEAD
+[0.5.0]: https://example.com/kurukuru/compare/v0.4.0...v0.5.0
 [0.4.0]: https://example.com/kurukuru/compare/v0.3.1...v0.4.0
 [0.3.1]: https://example.com/kurukuru/compare/v0.3.0...v0.3.1
 [0.3.0]: https://example.com/kurukuru/compare/v0.2.1...v0.3.0

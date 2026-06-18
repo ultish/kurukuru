@@ -10,13 +10,15 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init [--stack T] [--profile FILE]   scaffold .kuru/ in the current repo
-  kuru set-stack <tool>             rewrite config.json gates from a build-tool preset
-  kuru new-slice "<title>" [--epic E]
+  kuru init [--stack T] [--profile FILE ...]  scaffold .kuru/ (--profile repeatable)
+  kuru set-stack <tool> [--target N]  rewrite config gates from a preset (or seed one target)
+  kuru new-slice "<title>" [--epic E] [--target N]
+  kuru set-target <id> <target>     assign a slice to a config.json gate target
   kuru ls [--status S]              list slices (table)
   kuru show <id>                    show one slice (paths + state + history)
   kuru next                         print the next actionable slice
   kuru set-status <id> <status> [--note "..."] [--by agent|human]
+                                    (-> done auto-commits the working tree)
   kuru gate <id>                    run the configured deterministic gates
   kuru check <id>                   print whether <id> may advance to 'verified'
   kuru doctor                       sanity-check the .kuru workspace
@@ -207,20 +209,25 @@ def cmd_init(args):
     for sub in ("", "slices", "prd"):
         (kd / sub).mkdir(parents=True, exist_ok=True)
 
-    # Optional reusable environment profile (kept OUTSIDE the plugin by the user).
-    profile = None
-    if args.profile:
+    # Optional reusable environment profiles (kept OUTSIDE the plugin by the user).
+    # `--profile` may be repeated: pass a *catalog* of single-stack profiles and
+    # /kuru:charter picks the ones that match the apps it discovers in this repo,
+    # assigns each a gate target + dir, and folds its environment/conventions in.
+    profiles = []
+    for ppath in (args.profile or []):
         try:
-            profile = json.loads(Path(args.profile).read_text())
+            profiles.append((Path(ppath), json.loads(Path(ppath).read_text())))
         except Exception as e:
-            die(f"could not read --profile {args.profile}: {e}")
+            die(f"could not read --profile {ppath}: {e}")
 
-    # Seed config.json from a stack preset (profile.stack or --stack), else the node
-    # default. A profile's `config`/`environment` are deliberately NOT applied here:
-    # they are *guidance* for /kuru:charter, which summarizes them back to the user,
-    # fills any gaps, and writes the authoritative config.json + charter. init only
-    # lays down a sane starting config so `doctor` passes before the charter runs.
-    stack = (profile or {}).get("stack") or args.stack
+    # Seed a sane STARTING config so `doctor` passes before the charter runs. With a
+    # SINGLE profile we seed its stack preset (a nice default); with several (or none)
+    # we seed the --stack preset or the node default. A profile's
+    # config/environment/conventions — and, for a polyglot repo, the choice of which
+    # profiles apply and to which app/dir — are guidance for /kuru:charter, never
+    # applied at init: the charter writes the authoritative config.json (a flat gate
+    # set, or a multi-app `targets` map) + charter.
+    stack = (profiles[0][1].get("stack") if len(profiles) == 1 else None) or args.stack
     config_src = f"config.{stack}.json" if stack else "config.json"
     config_text = render(read_template(config_src), PROJECT=root.name)
 
@@ -237,9 +244,6 @@ def cmd_init(args):
         # this excludes only the machine-local bits.
         ".gitignore": "# machine-local — do not commit\nengine\nslices/*/gate-*.log\n",
     }
-    if profile is not None:
-        # Persist the profile so /kuru:charter can pre-fill from it.
-        seed["profile.json"] = json.dumps(profile, indent=2) + "\n"
     for name, content in seed.items():
         path = kd / name
         if path.exists() and not args.force:
@@ -247,6 +251,20 @@ def cmd_init(args):
         path.write_text(content)
         if name == "init.sh":
             path.chmod(0o755)
+
+    # Stash each profile under .kuru/profiles/ (committed guidance) for the charter
+    # to read. Name files by their source stem, de-duplicated.
+    if profiles:
+        pdir = kd / "profiles"
+        pdir.mkdir(exist_ok=True)
+        used: set[str] = set()
+        for src, data in profiles:
+            stem = src.stem or "profile"
+            name, i = stem, 2
+            while name in used:
+                name, i = f"{stem}-{i}", i + 1
+            used.add(name)
+            (pdir / f"{name}.json").write_text(json.dumps(data, indent=2) + "\n")
 
     # Record where THIS engine lives, captured now while we know our own path.
     # A last-resort pointer for humans/agents when KURU_PY/CLAUDE_PLUGIN_ROOT
@@ -257,11 +275,11 @@ def cmd_init(args):
 
     print(f"Initialized Kurukuru workspace at {kd}"
           + (f" (stack: {stack})" if stack else "")
-          + (" (profile loaded)" if profile is not None else ""))
+          + (f" ({len(profiles)} profile{'s' if len(profiles) != 1 else ''} loaded)" if profiles else ""))
     print(f"Engine recorded at {kd / 'engine'}.")
     print(f"Tip: for robust command resolution set  KURU_PY={engine}  in the "
           "kurukuru plugin's env (Claude Code plugin settings).")
-    print("Next: run /kuru:charter (it reads .kuru/profile.json as guidance if "
+    print("Next: run /kuru:charter (it reads .kuru/profiles/ as guidance if "
           "present, confirms it with you, then writes config.json), or edit "
           ".kuru/config.json gates by hand.")
 
@@ -277,15 +295,47 @@ def cmd_set_stack(args):
         project = led.get("meta", {}).get("project") or project
     except Exception:
         pass
-    content = render(read_template(f"config.{args.stack}.json"), PROJECT=project)
-    (kd / "config.json").write_text(content)
+    rendered = render(read_template(f"config.{args.stack}.json"), PROJECT=project)
+    target = getattr(args, "target", None)
+    if target:
+        # Multi-app repo: seed/replace ONE target's gates, preserving the rest of
+        # config.json (other targets, project, etc.). The preset is parsed only for
+        # its `gates`; the target keeps (or defaults) its own working `dir`.
+        preset = json.loads(rendered)
+        try:
+            cfg = load_json(kd / "config.json")
+        except Exception:
+            cfg = {"project": project}
+        tmap = cfg.setdefault("targets", {})
+        existing_dir = tmap.get(target, {}).get("dir", ".")
+        tmap[target] = {"dir": existing_dir, "gates": preset.get("gates", {})}
+        save_json(kd / "config.json", cfg)
+        print(f"Set target '{target}' gates from the config.{args.stack}.json preset "
+              f"(dir: {existing_dir}).")
+        print(f"Now set this target's `dir` (where the app lives) and tailor its gate commands,")
+        print("then run `kuru doctor`.")
+        return
+    (kd / "config.json").write_text(rendered)
     print(f"Rewrote {kd / 'config.json'} from config.{args.stack}.json preset.")
     print("Now tailor the gate commands (task/script names, versions, air-gapped flags),")
-    print("then run `kuru doctor`.")
+    print("then run `kuru doctor`. For a multi-app repo, use `set-stack <tool> --target <name>`")
+    print("once per app instead, so each gets its own dir + gates.")
 
 
 def cmd_new_slice(args):
     led = load_ledger()
+    # Validate everything that can fail BEFORE touching the filesystem, so a bad
+    # invocation never leaves an orphan slice dir that collides with the next id.
+    target = getattr(args, "target", None)
+    if target:
+        targets = _targets(_config())
+        if target not in targets:
+            die(f"unknown target '{target}'. config.json targets: {', '.join(targets)}. "
+                f"(Define targets in the charter step, or omit --target for a single-app repo.)")
+    deps = []
+    if getattr(args, "depends_on", None):
+        deps = [d.strip().upper() for d in args.depends_on.split(",") if d.strip()]
+
     sid = next_id(led)
     kd = kuru_dir()
     sdir = kd / "slices" / sid
@@ -297,15 +347,13 @@ def cmd_new_slice(args):
     (sdir / "build-log.md").write_text(render(read_template("build-log.md"), **fields))
     (sdir / "verification.md").write_text(render(read_template("verification.md"), **fields))
 
-    deps = []
-    if getattr(args, "depends_on", None):
-        deps = [d.strip().upper() for d in args.depends_on.split(",") if d.strip()]
     led["slices"].append({
         "id": sid,
         "title": args.title,
         "epic": args.epic,
         "status": "draft",
         "depends_on": deps,
+        "target": target,
         "created": now(),
         "updated": now(),
         "history": [{"at": now(), "status": "draft", "by": "human", "note": "created"}],
@@ -313,7 +361,23 @@ def cmd_new_slice(args):
     save_ledger(led)
     print(f"Created {sid}: {args.title}")
     print(f"  dir: {sdir}")
+    if target:
+        print(f"  target: {target}")
     print("  Fill in slice.md + contract.yml, then `kuru set-status %s ready`." % sid)
+
+
+def cmd_set_target(args):
+    led = load_ledger()
+    s = get_slice(led, args.id)
+    if not s:
+        die(f"no slice {args.id}")
+    targets = _targets(_config())
+    if args.target not in targets:
+        die(f"unknown target '{args.target}'. config.json targets: {', '.join(targets)}.")
+    s["target"] = args.target
+    s["updated"] = now()
+    save_ledger(led)
+    print(f"{s['id']}: target -> {args.target}")
 
 
 def cmd_ls(args):
@@ -328,10 +392,18 @@ def cmd_ls(args):
         print("(no slices)")
         return
     width = max(len(s["title"]) for s in rows)
-    print(f"{'ID':<8} {'STATUS':<12} {'EPIC':<10} TITLE")
-    print("-" * (8 + 12 + 10 + min(width, 50) + 3))
-    for s in rows:
-        print(f"{s['id']:<8} {s['status']:<12} {str(s.get('epic') or '—'):<10} {s['title']}")
+    show_target = any(s.get("target") for s in rows)
+    if show_target:
+        print(f"{'ID':<8} {'STATUS':<12} {'TARGET':<10} {'EPIC':<10} TITLE")
+        print("-" * (8 + 12 + 10 + 10 + min(width, 50) + 4))
+        for s in rows:
+            print(f"{s['id']:<8} {s['status']:<12} {str(s.get('target') or '—'):<10} "
+                  f"{str(s.get('epic') or '—'):<10} {s['title']}")
+    else:
+        print(f"{'ID':<8} {'STATUS':<12} {'EPIC':<10} TITLE")
+        print("-" * (8 + 12 + 10 + min(width, 50) + 3))
+        for s in rows:
+            print(f"{s['id']:<8} {s['status']:<12} {str(s.get('epic') or '—'):<10} {s['title']}")
 
 
 def cmd_show(args):
@@ -399,12 +471,13 @@ def cmd_next(args):
     if use_json:
         print(json.dumps({
             "next_action": action, "id": s["id"], "status": s["status"],
-            "title": s["title"], "epic": s.get("epic"), "depends_on": deps_of(s),
-            "label": label[s["status"]],
+            "title": s["title"], "epic": s.get("epic"), "target": s.get("target"),
+            "depends_on": deps_of(s), "label": label[s["status"]],
             "dir": str(kuru_dir() / "slices" / s["id"]),
         }))
         return
-    print(f"{s['id']}  [{s['status']}]  {s['title']}")
+    tgt = f"  (target: {s['target']})" if s.get("target") else ""
+    print(f"{s['id']}  [{s['status']}]{tgt}  {s['title']}")
     print(f"  -> {label[s['status']]}")
     print(f"  -> {kuru_dir() / 'slices' / s['id']}")
 
@@ -452,10 +525,74 @@ def cmd_set_status(args):
     s["history"].append({"at": now(), "status": new, "by": args.by, "note": args.note or ""})
     save_ledger(led)
     print(f"{s['id']}: {cur} -> {new}")
+    if new == "done":
+        _commit_slice(s)
+
+
+def _commit_slice(s: dict) -> None:
+    """Commit the working tree when a slice reaches `done`, so each shipped slice
+    is one atomic commit — its code, its `.kuru/` artifacts, and the ledger's
+    transition to `done` together. Best-effort: it never undoes the state change.
+    If the repo isn't a git work tree, there's nothing to commit, or `git commit`
+    fails (e.g. no configured identity, a rejecting hook), it warns and moves on —
+    the slice is already `done` in the ledger."""
+    root = find_root()
+    if root is None:
+        return
+
+    def git(*a):
+        return subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
+
+    if git("rev-parse", "--is-inside-work-tree").returncode != 0:
+        return  # not a git repo — quietly skip
+    git("add", "-A")
+    if not git("status", "--porcelain").stdout.strip():
+        print("  (working tree clean — nothing to commit)")
+        return
+    msg = f"kuru: ship {s['id']} — {s['title']}"
+    r = git("commit", "-m", msg)
+    if r.returncode != 0:
+        detail = (r.stderr.strip() or r.stdout.strip() or "git commit failed").splitlines()[0]
+        print(f"  ! auto-commit skipped ({detail}); {s['id']} is still marked done")
+        return
+    sha = git("rev-parse", "--short", "HEAD").stdout.strip()
+    print(f"  committed {sha}: {msg}")
 
 
 def _config() -> dict:
     return load_json(kuru_dir() / "config.json")
+
+
+def _targets(cfg: dict) -> dict:
+    """Normalize gate config into {name: {"dir": str, "gates": dict}}.
+
+    A polyglot/monorepo declares a `targets` map in config.json — one entry per
+    build flavor (a gradle service, a pnpm web app), each with its own working
+    `dir` (relative to the repo root) and `gates`. A single-app repo keeps a flat
+    top-level `gates`; that's treated as one implicit target named 'default' rooted
+    at the repo ('.'), so existing configs keep working unchanged."""
+    tg = cfg.get("targets")
+    if tg:
+        return {name: {"dir": (spec.get("dir") or "."), "gates": spec.get("gates", {})}
+                for name, spec in tg.items()}
+    return {"default": {"dir": ".", "gates": cfg.get("gates", {})}}
+
+
+def _slice_target(s: dict, cfg: dict) -> tuple[str, dict]:
+    """Resolve which target's gates a slice runs. Returns (name, {"dir","gates"})."""
+    targets = _targets(cfg)
+    want = s.get("target")
+    if want:
+        if want not in targets:
+            die(f"slice {s['id']} targets '{want}', which is not in config.json "
+                f"(targets: {', '.join(targets) or 'none'}). Fix with "
+                f"`kuru set-target {s['id']} <name>`.")
+        return want, targets[want]
+    if len(targets) == 1:
+        name = next(iter(targets))
+        return name, targets[name]
+    die(f"slice {s['id']} has no target, but config.json defines several "
+        f"({', '.join(targets)}). Assign one: `kuru set-target {s['id']} <name>`.")
 
 
 def _latest_gate(sid: str) -> dict | None:
@@ -515,15 +652,20 @@ def cmd_gate(args):
     if not s:
         die(f"no slice {args.id}")
     cfg = _config()
-    gates = cfg.get("gates", {})
+    tname, target = _slice_target(s, cfg)
+    gates = target["gates"]
     if not gates:
-        die("no gates configured in .kuru/config.json")
+        die(f"no gates configured for target '{tname}' in .kuru/config.json")
+
+    root = find_root()
+    cwd = (root / target["dir"]).resolve()
+    if not cwd.is_dir():
+        die(f"target '{tname}' dir '{target['dir']}' does not exist under {root}")
 
     sdir = kuru_dir() / "slices" / s["id"]
-    root = find_root()
     results = []
     overall = True
-    print(f"Running gates for {s['id']} (cwd: {root}) ...\n")
+    print(f"Running gates for {s['id']} [target: {tname}] (cwd: {cwd}) ...\n")
     for name, spec in gates.items():
         cmd = spec["cmd"]
         required = spec.get("required", True)
@@ -531,7 +673,7 @@ def cmd_gate(args):
         logp = sdir / f"gate-{name}.log"
         print(f"  ▶ {name}: {cmd}")
         print(f"    live log: {logp}  ·  watch with:  tail -f {logp}")
-        code, tail = _run_one_gate(cmd, timeout, root, logp)
+        code, tail = _run_one_gate(cmd, timeout, cwd, logp)
         ok = code == 0
         if required and not ok:
             overall = False
@@ -545,7 +687,8 @@ def cmd_gate(args):
 
     summary = ", ".join(f"{r['name']}={'ok' if r['passed'] else 'x'}" for r in results)
     record = {
-        "slice": s["id"], "ran_at": now(), "passed": overall,
+        "slice": s["id"], "target": tname, "dir": target["dir"],
+        "ran_at": now(), "passed": overall,
         "summary": summary, "gates": results,
     }
     save_json(kuru_dir() / "slices" / s["id"] / "gate-results.json", record)
@@ -582,10 +725,23 @@ def cmd_doctor(args):
     for f in ("config.json", "ledger.json", "charter.md", "progress.md"):
         if not (kd / f).exists():
             problems.append(f"missing {f}")
+    targets, multi = {}, False
     try:
         cfg = load_json(kd / "config.json")
-        if not cfg.get("gates"):
-            problems.append("config.json has no gates configured")
+        targets = _targets(cfg)
+        multi = bool(cfg.get("targets")) and len(targets) > 1
+        for tname, t in targets.items():
+            if not t["gates"]:
+                if tname == "default" and not cfg.get("targets"):
+                    problems.append("config.json has no gates configured")
+                else:
+                    problems.append(f"target '{tname}' has no gates configured")
+            tdir = (root / t["dir"]).resolve()
+            if not tdir.is_dir():
+                problems.append(f"target '{tname}' dir '{t['dir']}' does not exist under {root}")
+        if cfg.get("targets") and cfg.get("gates"):
+            problems.append("config.json has both top-level `gates` and `targets`; the "
+                            "top-level `gates` is ignored — move it into a target or remove it")
     except Exception as e:
         problems.append(f"config.json invalid: {e}")
     try:
@@ -594,6 +750,13 @@ def cmd_doctor(args):
         for s in led.get("slices", []):
             if s["status"] == "dropped":
                 continue
+            tgt = s.get("target")
+            if tgt and tgt not in targets:
+                problems.append(f"{s['id']} targets unknown '{tgt}' "
+                                f"(config targets: {', '.join(targets) or 'none'})")
+            elif not tgt and multi:
+                problems.append(f"{s['id']} has no target but config defines several "
+                                f"({', '.join(targets)}); set one with `set-target {s['id']} <name>`")
             for d in deps_of(s):
                 if d not in status_by_id:
                     problems.append(f"{s['id']} depends on unknown slice {d}")
@@ -622,19 +785,28 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true")
     s.add_argument("--stack", default=None,
                    help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. node|pnpm|gradle|maven|go|python|cargo)")
-    s.add_argument("--profile", default=None,
-                   help="path to a reusable environment profile (JSON): {stack?, config?, environment?}. "
-                        "Saved to .kuru/profile.json; /kuru:charter pre-fills from it.")
+    s.add_argument("--profile", action="append", default=None, metavar="FILE",
+                   help="path to a reusable single-stack environment profile (JSON): "
+                        "{stack?, config?, environment?, conventions?}. Repeatable — pass a "
+                        "catalog and /kuru:charter matches each to an app. Stashed under .kuru/profiles/.")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("set-stack"); s.add_argument("stack",
         help="build-tool preset: node|pnpm|gradle|maven|go|python|cargo (or any config.<stack>.json)")
+    s.add_argument("--target", default=None,
+                   help="multi-app repo: seed/replace just this named target's gates "
+                        "(preserving other targets) instead of rewriting the whole config")
     s.set_defaults(fn=cmd_set_stack)
 
     s = sub.add_parser("new-slice"); s.add_argument("title"); s.add_argument("--epic", default=None)
     s.add_argument("--depends-on", dest="depends_on", default=None,
                    help="comma-separated slice ids this slice depends on, e.g. SL-0001,SL-0002")
+    s.add_argument("--target", default=None,
+                   help="which config.json target's gates this slice runs (multi-app repos)")
     s.set_defaults(fn=cmd_new_slice)
+
+    s = sub.add_parser("set-target"); s.add_argument("id"); s.add_argument("target")
+    s.set_defaults(fn=cmd_set_target)
 
     s = sub.add_parser("ls"); s.add_argument("--status", default=None)
     s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_ls)

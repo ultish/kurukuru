@@ -1,6 +1,6 @@
 {
   "project": "{{PROJECT}}",
-  "_help": "Node/TypeScript preset. Each gate runs in the repo root; every required gate must exit 0 before a slice can be marked verified. Adjust the scripts to match this repo's package.json; delete gates you don't have; add integration/e2e/coverage gates you do.",
+  "_help": "Node/TypeScript preset. Each gate runs in its target's dir (the repo root for a single-app config); every required gate must exit 0 before a slice can be marked verified. Adjust the scripts to match this repo's package.json; delete gates you don't have; add integration/e2e/coverage gates you do.",
   "gates": {
     "typecheck": { "cmd": "npm run -s typecheck", "required": true, "timeout": 600 },
     "lint":      { "cmd": "npm run -s lint",      "required": true, "timeout": 600 },
