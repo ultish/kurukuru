@@ -287,9 +287,11 @@ stateDiagram-v2
     done --> [*]
 ```
 
-Plus two cross-cutting transitions kept off the diagram: **any → blocked** (and
-unblock back to anywhere), and **any-except-done → dropped → draft** (retire a
-slice, resurrect it for a re-write).
+Kept off the diagram for readability: **any → blocked** (and unblock back to
+anywhere); **any-except-done → dropped → draft** (retire a slice, resurrect it for
+a re-write); and three "step back" edges that let you rework without dropping —
+**ready → draft** (re-slice), **built → in_progress** (resume building before
+verifying), and **reviewed → in_progress** (reopen a reviewed slice).
 
 **Code review is opt-in.** A verified slice ships straight to `done`; run
 `/kuru:review` by hand on the slices that warrant a closer look. A review that

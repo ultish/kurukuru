@@ -71,8 +71,10 @@ stateDiagram-v2
     done --> [*]
 ```
 
-Off the diagram: **any → blocked** (unblock back to anywhere) and
-**any-except-done → dropped → draft** (retire/resurrect).
+Off the diagram: **any → blocked** (unblock back to anywhere); **any-except-done →
+dropped → draft** (retire/resurrect); and three "step back" edges for reworking
+without dropping — **ready → draft**, **built → in_progress**, and
+**reviewed → in_progress**.
 
 Code review is **opt-in**: a verified slice ships straight to `done`, and the loop
 never reviews. When you do run `/kuru:review`, both the verifier (`verifying ->

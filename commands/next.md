@@ -11,6 +11,8 @@ status, recommend (and offer to start) the matching command:
 - `ready` → `/kuru:build <id>`.
 - `in_progress` / `rejected` → `/kuru:build <id>` (resume).
 - `built` → `/kuru:verify <id>` (with an independent verifier).
+- `verifying` → `/kuru:verify <id>` (a verification was claimed but not finished —
+  re-verify with a fresh, independent verifier).
 - `verified` → ship it: `set-status <id> done` (auto-commits the slice). Code
   review is opt-in — offer `/kuru:review <id>` for a closer look, but it isn't required.
 - `reviewed` → ship it: `set-status <id> done` (auto-commits the slice).
