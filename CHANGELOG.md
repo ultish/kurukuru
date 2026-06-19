@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-19
+
 ### Added
 - **`/kuru:loop-slice <id>` — drive ONE named slice to `done`, then stop.** A dedicated
   single-slice counterpart to `/kuru:loop`: it builds → verifies → ships exactly the
@@ -24,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `runner.py --once` (which stopped after a single build/verify *step*) is replaced by
   `--slice <id>`, which drives one named slice all the way to `done`.
+
+### Fixed
+- State-machine docs (README + `kuru-method` skill) claimed only `→ blocked` and
+  `dropped → draft` were kept off the diagram, omitting three real `TRANSITIONS` edges
+  (`ready → draft`, `built → in_progress`, `reviewed → in_progress`); now documented.
+- `/kuru:next` and `/kuru:loop` prose had no `verifying` row, though `pick_next` can
+  surface a claimed-but-unfinished verification — added (re-verify with a fresh,
+  independent verifier).
 
 ## [0.5.0] - 2026-06-18
 
