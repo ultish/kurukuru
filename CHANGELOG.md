@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`/kuru:loop-slice <id>` — drive ONE named slice to `done`, then stop.** A dedicated
+  single-slice counterpart to `/kuru:loop`: it builds → verifies → ships exactly the
+  slice you name and terminates, instead of clearing the whole board. Unrelated slices
+  may still be `draft`; it refuses to start only if the *named* slice is a draft or its
+  dependencies aren't `done`. `runner.py` gains a matching `--slice <id>` flag.
+- **`kuru next --slice <id>` — the engine query the single-slice loop is built on.**
+  Returns the next action for one named slice (or `none` with a reason: `done` /
+  `blocked` / `waiting_on_deps`), enforcing its dependencies. This is why single-slice
+  mode can't drift onto a sibling: the "only this slice" guarantee is machine-checked in
+  `kuru.py`, not narrated. The board ranks building a fresh `ready` slice above shipping
+  a `verified` one, so a loop that followed the board's `next` each step could interleave
+  a second slice before the target ships — `next --slice` sidesteps that entirely.
+
+### Changed
+- `runner.py --once` (which stopped after a single build/verify *step*) is replaced by
+  `--slice <id>`, which drives one named slice all the way to `done`.
+
 ## [0.5.0] - 2026-06-18
 
 ### Added

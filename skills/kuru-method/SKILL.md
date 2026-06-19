@@ -47,7 +47,9 @@ build → verify → done cycle is mechanical and can be driven
 automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,
 spawning a fresh builder and a **separate** verifier per slice, and stops on any
 `blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
-runs charter/PRD/slicing for you.
+runs charter/PRD/slicing for you. To ship a **single** named slice and stop there,
+use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
+<id>` (so it can't drift onto a ready sibling the board would rank first).
 
 ## The slice state machine (enforced by kuru.py)
 
@@ -155,7 +157,7 @@ repo, so resolve its path in this order:
 | `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
 | `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
-| `next [--json]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). |
+| `next [--json] [--slice <id>]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. |
 | `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. |
 | `gate <id>` | Run the slice's gates; write `gate-results.json`; non-zero on fail. In a multi-target repo, runs only the slice's target's gates, in that target's `dir`. |
 | `check <id>` | Read-only: may this slice reach `verified`? |

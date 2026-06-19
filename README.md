@@ -111,7 +111,8 @@ frozen contracts, the rest is mechanical. There are two ways to drive it:
 
 - **In-session:** `/kuru:loop` runs build → verify → done over the ready slices
   until the board is clear (code review is opt-in — run `/kuru:review` by hand) —
-  good for watching it work or testing without the runner.
+  good for watching it work or testing without the runner. To ship just **one** named
+  slice and stop there, use `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
 - **Headless / unattended:** [`runner.py`](runner.py) — see below.
 
 Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
@@ -230,8 +231,9 @@ engine's gate/role/dependency rules still gate every transition.
    # preview the next action without launching claude:
    python3 /path/to/kuru/runner.py --repo /path/to/target-repo --dry-run
 
-   # do a single step then stop (good for a first run):
-   python3 /path/to/kuru/runner.py --repo /path/to/target-repo --once
+   # drive a single slice by id all the way to done, then stop
+   # (good for a first run; refuses if it's a draft or its deps aren't done):
+   python3 /path/to/kuru/runner.py --repo /path/to/target-repo --slice SL-0003
    ```
 
 By default `--plugin-dir` is the directory holding `runner.py` (this repo). If you
@@ -262,7 +264,8 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 | `--permission-mode` | `bypassPermissions` | Passed to `claude` per step. |
 | `--settings` / `--allowed-tools` | — | Tighten permissions instead of bypassing. |
 | `--model` | — | Passed to `claude --model`. |
-| `--dry-run` / `--once` | — | Preview next action / do one step then stop. |
+| `--dry-run` | — | Preview the next action without launching claude. |
+| `--slice <id>` | — | Drive only that slice to done, then stop (refuses if it's a draft or its deps aren't done). |
 
 ## The slice state machine
 
@@ -311,7 +314,7 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter prd slice build verify review status next bearings loop
+├── commands/        init charter prd slice build verify review status next bearings loop loop-slice
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier
 ├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)

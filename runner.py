@@ -15,6 +15,10 @@ context, so nothing accumulates: builder and verifier are not just separate
 agents but separate OS processes. State carries between steps only through the
 `.kuru/` files — which is exactly what the plugin persists.
 
+With `--slice <id>` it drives a single named slice to `done` and stops instead of
+clearing the board, asking the engine `kuru next --slice <id>` each step so it acts
+on that one slice only (never a sibling the board would rank first).
+
 Division of labour (deliberate):
   • The runner DECIDES (what's next, retries, when to stop) — never by asking a
     model; `kuru.py` is the brain.
@@ -22,8 +26,9 @@ Division of labour (deliberate):
     progress status, so the engine's gate + role rules still gate every
     transition. The runner only escalates to `blocked` when it gives up.
 
-Preconditions: charter + PRD + frozen (non-draft) slices must already exist.
-The runner refuses to start charter/PRD/slicing — those need a human.
+Preconditions: charter + PRD + frozen (non-draft) slices must already exist (in
+`--slice` mode, only the named slice and its dependencies need contracts). The
+runner refuses to start charter/PRD/slicing — those need a human.
 
 Requires: python3 (stdlib only) and the `claude` CLI. No third-party deps.
 """
@@ -63,7 +68,7 @@ class Runner:
         self.max_retries = args.max_retries
         self.max_iters = args.max_iters
         self.dry_run = args.dry_run
-        self.once = args.once
+        self.slice = (args.slice or "").upper() or None   # --slice: drive only this id
         self.claude = args.claude_bin
         self.permission_mode = args.permission_mode
         self.allowed_tools = args.allowed_tools
@@ -111,7 +116,7 @@ class Runner:
         return proc.returncode
 
     # -- preconditions -------------------------------------------------------- #
-    def check_preconditions(self) -> str | None:
+    def check_preconditions(self, single: bool) -> str | None:
         kd = self.repo / ".kuru"
         if not kd.is_dir():
             return f"no .kuru workspace in {self.repo} (run `kuru init` first)."
@@ -126,10 +131,32 @@ class Runner:
         slices = self.kuru_json("ls", "--json")
         if not slices:
             return "no slices — run /kuru:slice (needs a human)."
-        drafts = [s["id"] for s in slices if s["status"] == "draft"]
-        if drafts:
-            return (f"draft slices need contracts before the loop can run: "
-                    f"{', '.join(drafts)} — finish /kuru:slice (needs a human).")
+        # The whole board must be contracted only to *clear the board*. In
+        # single-slice mode just the target (and its deps) need a contract — other
+        # drafts are fine — so defer to check_named_target / the loop's draft branch.
+        if not single:
+            drafts = [s["id"] for s in slices if s["status"] == "draft"]
+            if drafts:
+                return (f"draft slices need contracts before the loop can run: "
+                        f"{', '.join(drafts)} — finish /kuru:slice (needs a human).")
+        return None
+
+    def check_named_target(self) -> str | None:
+        """--slice <id>: the named slice must exist and have all deps `done`.
+        `kuru next` enforces deps for an auto-picked target; naming one bypasses
+        that, so re-check here rather than build on an unfinished prerequisite."""
+        by_id = {s["id"]: s for s in self.kuru_json("ls", "--json")}
+        if self.slice not in by_id:
+            return f"no slice {self.slice} (have: {', '.join(by_id) or 'none'})."
+        info = self.kuru_json("show", self.slice, "--json")
+        if info["status"] == "draft":
+            return f"{self.slice} is still a draft — finish /kuru:slice to contract it first."
+        done = {sid for sid, s in by_id.items() if s["status"] == "done"}
+        unmet = [d for d in (info.get("depends_on") or []) if d not in done]
+        if unmet:
+            return (f"{self.slice} depends on {', '.join(unmet)}, not done yet — "
+                    f"finish {'those' if len(unmet) > 1 else 'it'} first "
+                    f"(--slice each, or clear the whole board).")
         return None
 
     # -- main loop ------------------------------------------------------------ #
@@ -138,31 +165,53 @@ class Runner:
             print("error: claude CLI not found (use --claude-bin).", file=sys.stderr)
             return 2
 
-        problem = self.check_preconditions()
+        # Single-slice mode (--slice <id>): drive exactly one named slice to done,
+        # then stop, instead of clearing the whole board.
+        single = self.slice is not None
+
+        problem = self.check_preconditions(single)
         if problem:
             print(f"Refusing to start: {problem}")
             return 2
 
+        if self.slice is not None:
+            bad = self.check_named_target()
+            if bad:
+                print(f"Refusing to start: {bad}")
+                return 2
+
         done_count = 0
         last_key = None       # (sid, status) we acted on last iteration
         stalls = 0
+        target = self.slice
 
         for i in range(1, self.max_iters + 1):
-            nxt = self.kuru_json("next", "--json")
+            # Single-slice mode asks the engine for the action of *this slice only*
+            # (`next --slice <id>`) — never the board's pick — so it can't drift onto
+            # a fresh ready sibling the board ranks ahead of shipping our target.
+            if single:
+                nxt = self.kuru_json("next", "--slice", target, "--json")
+            else:
+                nxt = self.kuru_json("next", "--json")
             action = nxt["next_action"]
 
             if action == "none":
                 reason = nxt.get("reason")
-                if reason == "all_done":
-                    print(f"\n✓ Board clear — every slice is done. ({done_count} reached done this run)")
+                if reason in ("all_done", "done"):
+                    if single:
+                        print(f"\n✓ {target} reached done — one slice complete.")
+                    else:
+                        print(f"\n✓ Board clear — every slice is done. ({done_count} reached done this run)")
                     return 0
                 if reason == "waiting_on_deps":
                     waits = ", ".join(f"{w['id']}<-{','.join(w['unmet'])}" for w in nxt.get("waiting", []))
-                    print(f"\n⛔ Deadlocked waiting on dependencies that won't resolve: {waits}")
+                    print(f"\n⛔ Waiting on dependencies that won't resolve here: {waits}")
                     print("   A dependency is blocked or undone. Needs a human.")
                     return 1
-                print(f"\n⛔ Nothing actionable; blocked slices need a human: "
-                      f"{', '.join(nxt.get('blocked', []))}")
+                # blocked: a named slice that is itself blocked (reason 'blocked'), or
+                # the board's blocked set (reason 'blocked_present').
+                stuck = nxt.get("blocked") or ([nxt["id"]] if nxt.get("status") == "blocked" else [])
+                print(f"\n⛔ Nothing actionable; blocked slices need a human: {', '.join(stuck)}")
                 return 1
 
             sid, status = nxt["id"], nxt["status"]
@@ -180,9 +229,7 @@ class Runner:
                 print(f"  ✓ {sid} -> done (review skipped — opt-in)")
                 done_count += 1
                 last_key = (sid, status)
-                if self.once:
-                    print("\n(--once) stopping after one step.")
-                    return 0
+                # single-slice mode: the next iteration re-derives the target as done and stops.
                 continue
 
             print(f"[{i}] {sid} [{status}] -> {action}  ({nxt['title']})")
@@ -221,10 +268,6 @@ class Runner:
                 done_count += 1
             last_key = key
 
-            if self.once:
-                print("\n(--once) stopping after one step.")
-                return 0
-
         print(f"\n⚠ Hit --max-iters ({self.max_iters}) without clearing the board.")
         return 1
 
@@ -255,7 +298,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="path to the claude CLI (default: autodetect).")
     p.add_argument("--dry-run", action="store_true",
                    help="print the next action and exit without launching claude.")
-    p.add_argument("--once", action="store_true", help="do a single step then stop.")
+    p.add_argument("--slice", default=None, metavar="ID",
+                   help="drive only this slice (e.g. SL-0003) all the way to done, then "
+                        "stop — instead of clearing the whole board. Refuses if the slice "
+                        "is a draft or its deps aren't done.")
     return p
 
 

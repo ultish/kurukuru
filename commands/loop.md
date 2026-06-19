@@ -17,6 +17,9 @@ there is nothing left to do.
 `max-reject-retries` (from `$ARGUMENTS`, default **2**) caps how many times a single
 slice may be rejected/sent-back before the loop stops and asks for a human.
 
+To drive **one specific slice** to `done` and stop there (instead of clearing the whole
+board), use **`/kuru:loop-slice <id>`** rather than this command.
+
 ## Preconditions — refuse to start unless ALL hold
 
 Run these checks first; if any fails, STOP and tell the user exactly which command

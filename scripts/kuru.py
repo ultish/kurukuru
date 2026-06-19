@@ -440,8 +440,51 @@ def cmd_next(args):
         "reviewed": "reviewed — ready to ship",
         "draft": "needs a contract before it can be built",
     }
-    s = pick_next(led)
     use_json = getattr(args, "json", False)
+
+    def emit_action(s):
+        action = STATUS_ACTION[s["status"]]
+        if use_json:
+            print(json.dumps({
+                "next_action": action, "id": s["id"], "status": s["status"],
+                "title": s["title"], "epic": s.get("epic"), "target": s.get("target"),
+                "depends_on": deps_of(s), "label": label[s["status"]],
+                "dir": str(kuru_dir() / "slices" / s["id"]),
+            }))
+            return
+        tgt = f"  (target: {s['target']})" if s.get("target") else ""
+        print(f"{s['id']}  [{s['status']}]{tgt}  {s['title']}")
+        print(f"  -> {label[s['status']]}")
+        print(f"  -> {kuru_dir() / 'slices' / s['id']}")
+
+    # Single-slice query: the action for one named slice (for single-slice loops),
+    # so the caller never has to consult the board's pick and risk a sibling.
+    sid = getattr(args, "slice", None)
+    if sid:
+        s = get_slice(led, sid)
+        if s is None:
+            die(f"no slice {sid}")
+        if s["status"] in ("done", "blocked"):
+            if use_json:
+                print(json.dumps({"next_action": "none", "id": s["id"],
+                                  "status": s["status"], "reason": s["status"]}))
+            else:
+                print(f"{s['id']} is {s['status']} — nothing to loop.")
+            return
+        if s["status"] == "ready":
+            unmet = unmet_deps(led, s)
+            if unmet:
+                if use_json:
+                    print(json.dumps({"next_action": "none", "id": s["id"], "status": "ready",
+                                      "reason": "waiting_on_deps",
+                                      "waiting": [{"id": s["id"], "unmet": unmet}]}))
+                else:
+                    print(f"{s['id']} waiting on dependencies: {', '.join(unmet)}")
+                return
+        emit_action(s)
+        return
+
+    s = pick_next(led)
 
     if s is None:
         waiting = [(x["id"], unmet_deps(led, x)) for x in led["slices"]
@@ -467,19 +510,7 @@ def cmd_next(args):
             print("No actionable slices. Everything is done, or run /kuru:slice.")
         return
 
-    action = STATUS_ACTION[s["status"]]
-    if use_json:
-        print(json.dumps({
-            "next_action": action, "id": s["id"], "status": s["status"],
-            "title": s["title"], "epic": s.get("epic"), "target": s.get("target"),
-            "depends_on": deps_of(s), "label": label[s["status"]],
-            "dir": str(kuru_dir() / "slices" / s["id"]),
-        }))
-        return
-    tgt = f"  (target: {s['target']})" if s.get("target") else ""
-    print(f"{s['id']}  [{s['status']}]{tgt}  {s['title']}")
-    print(f"  -> {label[s['status']]}")
-    print(f"  -> {kuru_dir() / 'slices' / s['id']}")
+    emit_action(s)
 
 
 def cmd_set_status(args):
@@ -812,7 +843,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_ls)
     s = sub.add_parser("show"); s.add_argument("id")
     s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_show)
-    s = sub.add_parser("next"); s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_next)
+    s = sub.add_parser("next"); s.add_argument("--json", action="store_true")
+    s.add_argument("--slice", default=None, metavar="ID",
+                   help="action for this one slice only (for single-slice loops), "
+                        "not the board's next pick.")
+    s.set_defaults(fn=cmd_next)
 
     s = sub.add_parser("set-status"); s.add_argument("id"); s.add_argument("status")
     s.add_argument("--note", default=""); s.add_argument("--by", default="human",

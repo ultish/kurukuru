@@ -175,6 +175,40 @@ echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "
   && ok "verified slice surfaces via next (action ship)" || fail "verified not shippable: $nx"
 expect_ok "verified->done allowed directly (review opt-in)" $KURU set-status SL-0001 done
 
+echo "== next --slice: single-slice focus, independent of the board's ranking =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "A" >/dev/null            # SL-0001
+$KURU new-slice "B" --depends-on SL-0001 >/dev/null   # SL-0002 (blocked on A)
+$KURU new-slice "C" >/dev/null            # SL-0003 (independent, also ready)
+$KURU set-status SL-0001 ready >/dev/null
+$KURU set-status SL-0002 ready >/dev/null   # contracted, but dep SL-0001 not done
+$KURU set-status SL-0003 ready >/dev/null
+# a named slice waiting on an unfinished dep yields no action (deps enforced):
+$KURU next --slice SL-0002 --json | grep -q '"reason": "waiting_on_deps"' \
+  && ok "next --slice on dep-unmet slice -> none/waiting_on_deps" || fail "deps not enforced for --slice"
+# drive A to verified; meanwhile C stays a fresh ready sibling
+$KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null
+$KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+$KURU set-status SL-0001 verified --by verifier >/dev/null
+# the board's next prefers BUILDING the fresh ready C over SHIPPING verified A:
+$KURU next --json | grep -q '"id": "SL-0003"' \
+  && ok "board next prefers a ready sibling over shipping a verified slice" || fail "board ranking changed"
+# but next --slice keeps focus on A and says ship (this is the whole point):
+nx="$($KURU next --slice SL-0001 --json)"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
+  && ok "next --slice SL-0001 stays on A (action ship), ignoring the board" || fail "next --slice drifted: $nx"
+# terminal/blocked slices report none with a clear reason:
+$KURU set-status SL-0001 done >/dev/null
+$KURU next --slice SL-0001 --json | grep -q '"reason": "done"' \
+  && ok "next --slice on a done slice -> none/done" || fail "done reason wrong"
+$KURU set-status SL-0003 blocked --note x >/dev/null
+$KURU next --slice SL-0003 --json | grep -q '"reason": "blocked"' \
+  && ok "next --slice on a blocked slice -> none/blocked" || fail "blocked reason wrong"
+expect_fail "next --slice on a missing id errors" "no slice" $KURU next --slice SL-9999 --json
+
 echo "== auto-commit: marking a slice done commits the working tree =="
 newrepo >/dev/null; repo="$(pwd)"
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "auto commit me" >/dev/null
