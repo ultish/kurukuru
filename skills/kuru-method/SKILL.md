@@ -153,7 +153,7 @@ repo, so resolve its path in this order:
 
 | Command | Effect |
 |---|---|
-| `init [--force] [--stack <tool>] [--profile FILE ...]` | Scaffold `.kuru/` (optionally from a build-tool preset, or one or more reusable env profiles — repeatable, stashed under `.kuru/profiles/` as a catalog the charter matches to apps). |
+| `init [--force] [--stack <tool>] [--profile DIR\|URL]` | Scaffold `.kuru/` (optionally from a build-tool preset, or a *catalog* of reusable env profiles — a local directory of `*.json`, a single file, or a GitHub/GitLab tree URL — stashed under `.kuru/profiles/` for the charter to match to apps). |
 | `set-stack <tool> [--target N]` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. With `--target`, seed/replace just that one gate target (monorepo), preserving the others. |
 | `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..] [--target N]` | Create `SL-NNNN` + artifacts; status `draft`. `--target` binds it to a `config.json` gate target (monorepo). |
 | `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |

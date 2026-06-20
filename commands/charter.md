@@ -61,7 +61,7 @@ deploy, and it drives `.kuru/config.json`. The fields to establish:
     convention the slicer turns into an acceptance criterion the verifier checks.
 
 **If `.kuru/profiles/` holds any profiles** (the user ran `kuru init --profile
-<file>` one or more times), treat them as a **catalog of guidance, not gospel** —
+<dir|url>` with a profile catalog), treat them as a **catalog of guidance, not gospel** —
 each is one single-stack flavor (a gradle profile, a pnpm profile, …), and the user
 may have passed more than apply here. It's a head start on the fields above, not a
 finished answer:

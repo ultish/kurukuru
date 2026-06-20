@@ -86,7 +86,7 @@ don't need it for manual `/kuru:*` use.
 # 1. scaffold the workspace
 python3 /path/to/kuru/scripts/kuru.py init                  # creates ./.kuru/
 #    or seed gates for a build tool: init --stack node|pnpm|gradle|maven|go|python|cargo
-#    or reuse a saved environment:   init --profile ~/.kuru/profiles/gradle-kube.json
+#    or reuse a saved environment:   init --profile ~/.kuru/profiles/   (a catalog dir or URL)
 # 2. config.json gets configured for you during /kuru:charter (it interviews you about
 #    language, build pipeline, deploy env, and air-gapped constraints, then sets the gates).
 #    To (re)pick a preset manually:  kuru.py set-stack gradle   then tailor the commands.
@@ -123,18 +123,28 @@ rejections. The manual `/kuru:*` commands still work alongside either.
 ### Environment profiles (reuse a stack across projects)
 
 If you spin up many projects with the same stack — especially in an **air-gapped**
-org — save a reusable, **single-stack profile** and pass it to `init`. `--profile`
-is **repeatable**, so keep one file per build flavour and pass the relevant ones:
+org — keep a **catalog** of reusable, **single-stack profiles** (one file per build
+flavour) and point `init --profile` at it. `--profile` takes **one location**: a
+local directory of `*.json` profiles, a single `.json` file, or a hosted catalog
+URL (so a whole org can share one canonical set of profiles):
 
 ```bash
-# single-app repo
+# a directory of profiles (the charter picks the ones that apply)
+python3 /path/to/kuru/scripts/kuru.py init --profile ~/.kuru/profiles/
+
+# a single profile file
 python3 /path/to/kuru/scripts/kuru.py init --profile ~/.kuru/profiles/gradle-kube.json
 
-# polyglot/monorepo — pass a catalog; the charter picks what applies
+# a hosted catalog — GitHub contents API or GitLab repository-tree API URL
 python3 /path/to/kuru/scripts/kuru.py init \
-  --profile ~/.kuru/profiles/gradle-kube.json \
-  --profile ~/.kuru/profiles/pnpm-web.json
+  --profile 'https://gitlab.example.com/api/v4/projects/42/repository/tree?path=kuru-profiles'
 ```
+
+For a hosted catalog the engine fetches the listing and each `*.json` blob itself
+(reading `GITHUB_TOKEN` / `GITLAB_TOKEN` for private repos). When you run it through
+`/kuru:init`, the command will prefer a **skill** that already knows how to fetch
+from your host (GitLab/GitHub/Bitbucket, with its tokens) and only falls back to the
+engine's built-in fetcher if none is found.
 
 A profile is plain JSON you keep **outside the plugin** (see
 [`templates/profile.example.json`](templates/profile.example.json)):
@@ -152,9 +162,10 @@ A profile is plain JSON you keep **outside the plugin** (see
   `setup-conformance` gate so a builder that ignores the rule fails a gate, not just a
   reviewer's patience; judgmental ones become acceptance criteria.
 
-The profiles are **guidance, not gospel**, and a **catalog**: pass several and
-`/kuru:charter` picks the ones matching the apps it discovers in this repo (a Kotlin
-service → the gradle profile; a web app → the pnpm profile), assigns each a gate
+The profiles are **guidance, not gospel**, and a **catalog**: point `--profile` at a
+location holding several and `/kuru:charter` picks the ones matching the apps it
+discovers in this repo (a Kotlin service → the gradle profile; a web app → the pnpm
+profile), assigns each a gate
 **target** + `dir`, and ignores the rest. `init` seeds a starting `config.json` (from
 a lone profile's `stack`, else the node default) and stashes the profiles under
 `.kuru/profiles/`. Then `/kuru:charter` reads them, **summarizes back to you, hunts

@@ -10,7 +10,7 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init [--stack T] [--profile FILE ...]  scaffold .kuru/ (--profile repeatable)
+  kuru init [--stack T] [--profile DIR|URL]  scaffold .kuru/ (--profile = a profile catalog)
   kuru set-stack <tool> [--target N]  rewrite config gates from a preset (or seed one target)
   kuru new-slice "<title>" [--epic E] [--target N]
   kuru set-target <id> <target>     assign a slice to a config.json gate target
@@ -199,6 +199,111 @@ def pick_next(led: dict) -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
+# profile catalog (--profile)
+# --------------------------------------------------------------------------- #
+# `kuru init --profile <LOCATION>` loads a *catalog* of reusable single-stack
+# environment profiles from ONE place — instead of repeating the flag per file.
+# LOCATION may be: a local directory (every *.json in it), a single .json file,
+# or an http(s) URL to a GitHub *contents* / GitLab *repository tree* listing (we
+# list the directory, then fetch each *.json blob). All resolve to a list of
+# (name, data) pairs that init stashes under .kuru/profiles/ for /kuru:charter.
+def _http_get(url: str, headers: dict | None = None, timeout: int = 30) -> str:
+    import urllib.request, urllib.error
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "kurukuru-init", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        die(f"--profile fetch failed ({e.code} {e.reason}) for {url}")
+    except Exception as e:
+        die(f"--profile fetch failed for {url}: {e}")
+
+
+def _load_catalog_url(url: str) -> list[tuple[str, dict]]:
+    """Resolve an http(s) profile-catalog URL via a Git provider's tree/contents
+    API. Private repos: set GITHUB_TOKEN / GITLAB_TOKEN to authenticate."""
+    import urllib.parse as up
+    parsed = up.urlparse(url)
+    host = parsed.netloc.lower()
+
+    # GitHub: api.github.com/repos/OWNER/REPO/contents/DIR[?ref=BRANCH]
+    if host == "api.github.com" and "/contents/" in parsed.path:
+        headers = {"Accept": "application/vnd.github+json"}
+        tok = os.environ.get("GITHUB_TOKEN")
+        if tok:
+            headers["Authorization"] = f"Bearer {tok}"
+        listing = json.loads(_http_get(url, headers))
+        if not isinstance(listing, list):
+            die(f"--profile {url}: expected a directory listing (got a file?)")
+        out = []
+        for e in listing:
+            if e.get("type") == "file" and e.get("name", "").endswith(".json"):
+                raw = _http_get(e["download_url"], headers)
+                out.append((Path(e["name"]).stem, json.loads(raw)))
+        if not out:
+            die(f"--profile {url}: no *.json profiles in that listing")
+        return out
+
+    # GitLab: HOST/api/v4/projects/ID/repository/tree?path=DIR[&ref=BRANCH]
+    if "/api/v4/projects/" in parsed.path and "/repository/tree" in parsed.path:
+        headers = {}
+        tok = os.environ.get("GITLAB_TOKEN")
+        if tok:
+            headers["PRIVATE-TOKEN"] = tok
+        m = re.search(r"/projects/([^/]+)/repository/tree", parsed.path)
+        if not m:
+            die(f"--profile {url}: could not parse the GitLab project id")
+        pid = m.group(1)
+        base = f"{parsed.scheme}://{parsed.netloc}/api/v4/projects/{pid}"
+        ref = (up.parse_qs(parsed.query).get("ref") or [None])[0]
+        if not ref:  # no ref given — ask the API for the default branch
+            ref = json.loads(_http_get(base, headers)).get("default_branch") or "main"
+        listing = json.loads(_http_get(url, headers))
+        if not isinstance(listing, list):
+            die(f"--profile {url}: expected a directory listing (got a file?)")
+        out = []
+        for e in listing:
+            if e.get("type") == "blob" and e.get("name", "").endswith(".json"):
+                fp = up.quote(e["path"], safe="")
+                raw = _http_get(
+                    f"{base}/repository/files/{fp}/raw?ref={up.quote(ref)}", headers)
+                out.append((Path(e["name"]).stem, json.loads(raw)))
+        if not out:
+            die(f"--profile {url}: no *.json profiles in that listing")
+        return out
+
+    die(f"--profile {url}: unrecognized catalog URL. Use a GitHub contents API "
+        "(https://api.github.com/repos/OWNER/REPO/contents/DIR) or a GitLab tree "
+        "API (https://HOST/api/v4/projects/ID/repository/tree?path=DIR) URL.")
+
+
+def load_profile_catalog(location: str) -> list[tuple[str, dict]]:
+    """Normalize a --profile LOCATION (dir | .json file | http(s) catalog URL)
+    into a sorted list of (name, profile-dict) pairs."""
+    if re.match(r"^https?://", location, re.I):
+        return _load_catalog_url(location)
+    p = Path(location)
+    if p.is_dir():
+        files = sorted(p.glob("*.json"))
+        if not files:
+            die(f"--profile {location}: no *.json profiles in that directory")
+        out = []
+        for f in files:
+            try:
+                out.append((f.stem, json.loads(f.read_text())))
+            except Exception as e:
+                die(f"could not read profile {f}: {e}")
+        return out
+    if p.is_file():
+        try:
+            return [(p.stem or "profile", json.loads(p.read_text()))]
+        except Exception as e:
+            die(f"could not read --profile {location}: {e}")
+    die(f"--profile {location}: not a directory, .json file, or http(s) URL")
+
+
+# --------------------------------------------------------------------------- #
 # commands
 # --------------------------------------------------------------------------- #
 def cmd_init(args):
@@ -210,15 +315,12 @@ def cmd_init(args):
         (kd / sub).mkdir(parents=True, exist_ok=True)
 
     # Optional reusable environment profiles (kept OUTSIDE the plugin by the user).
-    # `--profile` may be repeated: pass a *catalog* of single-stack profiles and
-    # /kuru:charter picks the ones that match the apps it discovers in this repo,
-    # assigns each a gate target + dir, and folds its environment/conventions in.
-    profiles = []
-    for ppath in (args.profile or []):
-        try:
-            profiles.append((Path(ppath), json.loads(Path(ppath).read_text())))
-        except Exception as e:
-            die(f"could not read --profile {ppath}: {e}")
+    # `--profile <LOCATION>` points at a *catalog* — a directory of single-stack
+    # profile JSONs, a single .json file, or a Git tree/contents URL (see
+    # load_profile_catalog). /kuru:charter then picks the ones that match the apps
+    # it discovers in this repo, assigns each a gate target + dir, and folds its
+    # environment/conventions in.
+    profiles = load_profile_catalog(args.profile) if args.profile else []
 
     # Seed a sane STARTING config so `doctor` passes before the charter runs. With a
     # SINGLE profile we seed its stack preset (a nice default); with several (or none)
@@ -253,13 +355,13 @@ def cmd_init(args):
             path.chmod(0o755)
 
     # Stash each profile under .kuru/profiles/ (committed guidance) for the charter
-    # to read. Name files by their source stem, de-duplicated.
+    # to read. Name files by their catalog name (file stem / blob name), de-duplicated.
     if profiles:
         pdir = kd / "profiles"
         pdir.mkdir(exist_ok=True)
         used: set[str] = set()
-        for src, data in profiles:
-            stem = src.stem or "profile"
+        for stem, data in profiles:
+            stem = stem or "profile"
             name, i = stem, 2
             while name in used:
                 name, i = f"{stem}-{i}", i + 1
@@ -816,10 +918,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true")
     s.add_argument("--stack", default=None,
                    help="seed a stack-specific config (reads templates/config.<stack>.json, e.g. node|pnpm|gradle|maven|go|python|cargo)")
-    s.add_argument("--profile", action="append", default=None, metavar="FILE",
-                   help="path to a reusable single-stack environment profile (JSON): "
-                        "{stack?, config?, environment?, conventions?}. Repeatable — pass a "
-                        "catalog and /kuru:charter matches each to an app. Stashed under .kuru/profiles/.")
+    s.add_argument("--profile", default=None, metavar="DIR|URL",
+                   help="a CATALOG of reusable single-stack environment profiles "
+                        "({stack?, config?, environment?, conventions?} JSON) to load: a local "
+                        "DIRECTORY of *.json files, a single .json file, or an http(s) URL to a "
+                        "GitHub contents / GitLab repository-tree listing (private repos: set "
+                        "GITHUB_TOKEN / GITLAB_TOKEN). /kuru:charter matches each to an app. "
+                        "Stashed under .kuru/profiles/.")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("set-stack"); s.add_argument("stack",

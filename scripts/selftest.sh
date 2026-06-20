@@ -106,18 +106,24 @@ newrepo >/dev/null
 printf '{"config":{"gates":{"unit":{"cmd":"./gradlew test","required":true,"timeout":60}}}}\n' > "$prof"
 expect_ok "init --profile (config only, no stack)" $KURU init --profile "$prof"
 grep -q "npm " .kuru/config.json && ok "config-only profile falls back to node default seed" || fail "config-only profile didn't fall back to node"
-# REPEATABLE --profile: a catalog of single-stack profiles for a polyglot repo. Both
-# are stashed for the charter to match to apps; with >1 profile init seeds the node
-# default (the charter, not init, decides which apply and to which dir).
+# CATALOG --profile <DIR>: a directory of single-stack profiles for a polyglot repo.
+# Every *.json is stashed for the charter to match to apps; with >1 profile init seeds
+# the node default (the charter, not init, decides which apply and to which dir).
 newrepo >/dev/null
-pg="$(mktemp -d)/gradle-svc.json"; pw="$(mktemp -d)/pnpm-web.json"
-printf '{"stack":"gradle","environment":{"language":"Kotlin"}}\n' > "$pg"
-printf '{"stack":"pnpm","environment":{"language":"TypeScript"}}\n' > "$pw"
-expect_ok "init with multiple --profile (catalog)" $KURU init --profile "$pg" --profile "$pw"
+cat="$(mktemp -d)"
+printf '{"stack":"gradle","environment":{"language":"Kotlin"}}\n' > "$cat/gradle-svc.json"
+printf '{"stack":"pnpm","environment":{"language":"TypeScript"}}\n' > "$cat/pnpm-web.json"
+expect_ok "init --profile <dir> (catalog)" $KURU init --profile "$cat"
 [ -f .kuru/profiles/gradle-svc.json ] && [ -f .kuru/profiles/pnpm-web.json ] \
-  && ok "every profile stashed under .kuru/profiles/" || fail "not all profiles stashed"
-grep -q "npm " .kuru/config.json && ok "multi-profile init seeds the node default (charter composes targets)" || fail "multi-profile seed wrong"
-expect_ok "doctor healthy after a multi-profile init" $KURU doctor
+  && ok "every *.json in the catalog dir stashed under .kuru/profiles/" || fail "not all profiles stashed"
+grep -q "npm " .kuru/config.json && ok "multi-profile catalog seeds the node default (charter composes targets)" || fail "multi-profile seed wrong"
+expect_ok "doctor healthy after a catalog init" $KURU doctor
+# an empty catalog dir (no *.json) is a clear error, not a silent no-op.
+newrepo >/dev/null
+expect_fail "init --profile <empty dir> errors" "no *.json profiles" $KURU init --profile "$(mktemp -d)"
+# a non-existent location is rejected too.
+newrepo >/dev/null
+expect_fail "init --profile <bogus path> errors" "not a directory" $KURU init --profile /no/such/catalog
 
 echo "== SL-2: status + gate enforcement =="
 newrepo >/dev/null

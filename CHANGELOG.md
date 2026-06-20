@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-20
+
+### Changed
+- **`init --profile` now takes a single catalog LOCATION, not a repeated file flag.**
+  Instead of `--profile a.json --profile b.json`, point `--profile` at one place that
+  *holds* the profiles: a local **directory** of `*.json` files, a single `.json`
+  file, or an http(s) **URL** to a hosted catalog. The engine resolves a URL via the
+  GitHub *contents* API or GitLab *repository-tree* API — it lists the directory and
+  fetches each `*.json` blob, reading `GITHUB_TOKEN` / `GITLAB_TOKEN` for private
+  repos. Profiles are still stashed under `.kuru/profiles/` and matched to apps by
+  `/kuru:charter` exactly as before; only the input changed. **Migration:** replace
+  several `--profile <file>` flags with a single `--profile <dir>` pointing at the
+  directory that contains them.
+- **`/kuru:init` prefers a fetch *skill* for hosted-catalog URLs.** When `--profile`
+  is a GitLab/GitHub/Bitbucket URL, the command first looks for a user/project skill
+  that knows how to fetch from that host (with its access tokens), materializes the
+  catalog into a temp directory, and inits from that; it falls back to the engine's
+  built-in GitHub/GitLab fetcher only when no skill is found. (Bitbucket has no
+  built-in fetcher — it needs a skill.)
+
 ## [0.6.0] - 2026-06-19
 
 ### Added
