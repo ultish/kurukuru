@@ -369,3 +369,39 @@ to be shared.
   recorded; green gates are necessary but never sufficient.
 - **Evidence over assertion** — verification passes only on facts the verifier
   observed by exercising the running system.
+
+## Service
+
+status: in-progress
+team: [[team:jxhui]]
+domain: [[domain:ai-agents]]
+version: 0.7.0
+
+depends_on:
+  - Claude Code (plugin host — auto-discovers commands/, agents/, skills/)
+  - python3 stdlib (kuru.py engine; no third-party deps, ever)
+  - claude CLI + login (runner.py headless mode only)
+
+exposes:
+  - /kuru:init        — scaffold a .kuru/ workspace in the target repo
+  - /kuru:charter     — discovery session → charter.md
+  - /kuru:prd         — charter → PRD via kuru-planner
+  - /kuru:slice       — PRD → vertical slices with frozen contracts
+  - /kuru:build       — kuru-builder implements the next ready slice
+  - /kuru:verify      — kuru-verifier independently gatekeeps a built slice
+  - /kuru:review      — optional code review before marking done
+  - /kuru:loop        — autonomous build→verify→done loop over all ready slices
+  - /kuru:loop-slice  — same loop scoped to a single named slice
+  - /kuru:next        — print and start the next actionable slice
+  - /kuru:status      — delivery dashboard
+  - /kuru:bearings    — session startup ritual (context-reset recovery)
+  - runner.py         — standalone headless driver (not part of the plugin)
+  - scripts/kuru.py   — deterministic state + gate engine (CLI, callable directly)
+
+events:
+  publishes: []
+  subscribes: []
+
+see_also:
+  - [[adr:ADR-001]]  # planner/builder/verifier separation
+  - impl/BUILD_PLAN.md  # original spec (legacy — code wins on conflicts)
