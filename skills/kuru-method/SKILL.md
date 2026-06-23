@@ -35,6 +35,12 @@ flowchart LR
 - **review** *(opt-in)* — code review on the diff for slices that warrant a closer
   look. Not a required step: a verified slice ships straight to `done`, and the
   loop never runs review. (`/kuru:review`)
+- **ship** — the terminal transition: a `verified` (or `reviewed`) slice → `done`, which
+  auto-commits the working tree. Humans can run `set-status <id> done` directly;
+  `/kuru:ship <id>` is the thin command wrapper an automated driver (`/kuru:loop-workflow`)
+  uses, since workflow agents can't run `kuru.py`. With `--no-commit` it flips the ledger
+  but skips the commit (the parallel driver ships many slices into one tree, then commits
+  once after the run).
 
 **Open questions gate the move from charter → PRD → slice.** Ambiguity is cheapest
 to catch at the charter, and must be resolved at the latest in the PRD — *with the
@@ -49,7 +55,24 @@ spawning a fresh builder and a **separate** verifier per slice, and stops on any
 `blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
 runs charter/PRD/slicing for you. To ship a **single** named slice and stop there,
 use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
-<id>` (so it can't drift onto a ready sibling the board would rank first).
+<id>` (so it can't drift onto a ready sibling the board would rank first). To work
+**several independent slices in parallel**, use `/kuru:loop-workflow` — it authors a
+Claude Code **dynamic workflow** (a JS script the user approves and the workflow runtime
+runs in the background) as a **per-slice promise-DAG pipeline**: a planning agent reads
+`/kuru:status` once, then each slice gets its own driver that runs `build → verify → ship`
+as fast as it can — each step a **fresh, isolated `agent()`** — `await`ing its dependency
+drivers first (the dependency graph becomes a promise graph, so a dependent starts the
+instant its deps ship). That per-step clean context is the point: it clears a large board
+without saturating the session, which is why it supersedes the headless `runner.py`. The
+workflow's agents touch kuru only through the `/kuru:*` commands (`/kuru:build`,
+`/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py` directly, so the "only `kuru.py`
+mutates the ledger" rule holds; the engine serializes ledger writes with a file lock
+(`.kuru/.ledger.lock`) and the methodology guarantees independence — parallel-ready slices
+have no dependency between them. Ship defers its commit (`--no-commit`); the launching
+session makes **one commit after the run** instead of one per slice — trading per-slice
+revert granularity for parallel speed. See the `loop-workflow` skill for the design and the
+reference script. Across all three drivers,
+`max-reject-retries` is **per run** (a re-run resets every slice's tally).
 
 ## The slice state machine (enforced by kuru.py)
 
@@ -159,8 +182,8 @@ repo, so resolve its path in this order:
 | `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
 | `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
-| `next [--json] [--slice <id>]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. |
-| `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. |
+| `next [--json] [--slice <id>] [--all]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. With `--all`, **every** slice actionable now (deps satisfied) plus `waiting`/`draft`/`blocked`/`done` — the parallel batch `/kuru:loop-workflow` drives on. |
+| `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer] [--no-commit]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. **`--no-commit`** flips the ledger to `done` but skips the commit, leaving it to the caller (used by `/kuru:loop-workflow`, which commits once after the parallel run). Serialized by `.kuru/.ledger.lock` so parallel `loop-workflow` writes don't race. |
 | `gate <id>` | Run the slice's gates; write `gate-results.json`; non-zero on fail. In a multi-target repo, runs only the slice's target's gates, in that target's `dir`. |
 | `check <id>` | Read-only: may this slice reach `verified`? |
-| `doctor` | Validate the workspace. |
+| `doctor` | Validate the workspace. Hard ✗ on missing core files / no gates / unknown deps; a target `dir` that doesn't exist **yet** (a not-yet-built slice will create it) is a ⚠ warning, not a failure. |

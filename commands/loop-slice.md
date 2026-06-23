@@ -12,9 +12,10 @@ or to push a specific slice that matters next.
 
 The slice id comes from `$ARGUMENTS` (e.g. `SL-0003`); `max-reject-retries` (also from
 `$ARGUMENTS`, default **2**) caps how many times the slice may be rejected/sent-back
-before the loop stops and asks for a human. **Code review is opt-in** — a verified slice
-ships straight to `done`; run `/kuru:review <id>` by hand if this slice warrants a
-closer look.
+**in this run** before the loop stops and asks for a human. The budget is **per run** —
+re-running this command resets the tally to 0, so the cap governs only the current run.
+**Code review is opt-in** — a verified slice ships straight to `done`; run
+`/kuru:review <id>` by hand if this slice warrants a closer look.
 
 **Why a separate command (not a flag on `/kuru:loop`):** the board loop picks work with
 `kuru next`, whose ranking can hand back a *different* ready slice — so a single-slice
@@ -71,11 +72,12 @@ Repeat until a stop condition fires:
   subagent invocation** with its own context. Never let the agent that implemented the
   slice also verify it — the independence is the whole reason this works. The engine
   refuses `verified --by builder`, but you must also not reuse the builder's context.
-- **Cap the send-back cycle.** Before (re)building a `rejected` slice, read its history
-  (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" show <id>`) and count how many
-  times it has been `rejected`. If that count ≥ `max-reject-retries`, STOP:
-  `set-status <id> blocked --note "exceeded N build/verify retries: <last failure>"` and
-  hand to a human. Do not spin forever.
+- **Cap the send-back cycle, per run.** Keep a this-run rejection tally for the slice,
+  starting at 0 when the loop starts; increment it each time the slice is rejected during
+  this run. Do **not** read the slice's lifetime `rejections` from `show` — the budget is
+  per run, so a re-run gets a fresh one. When the tally reaches `max-reject-retries`,
+  STOP: `set-status <id> blocked --note "exceeded N build/verify retries this run: <last
+  failure>"` and hand to a human. Do not spin forever.
 - **`blocked` means stop, not skip.** If a builder or verifier sets the slice `blocked`,
   STOP and surface it — never route around it.
 - **Never fabricate progress.** You only ever change status through `kuru.py`; you never

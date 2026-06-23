@@ -15,10 +15,13 @@ commands still work — this just runs them for you, in `kuru next` order, until
 there is nothing left to do.
 
 `max-reject-retries` (from `$ARGUMENTS`, default **2**) caps how many times a single
-slice may be rejected/sent-back before the loop stops and asks for a human.
+slice may be rejected/sent-back **in this run** before the loop stops and asks for a
+human. The budget is **per run**: re-running `/kuru:loop` resets every slice's tally to
+0, so the cap governs only the current run — not the slice's lifetime.
 
 To drive **one specific slice** to `done` and stop there (instead of clearing the whole
-board), use **`/kuru:loop-slice <id>`** rather than this command.
+board), use **`/kuru:loop-slice <id>`**. To work several independent slices **in
+parallel** in one workflow, use **`/kuru:loop-workflow`**.
 
 ## Preconditions — refuse to start unless ALL hold
 
@@ -66,11 +69,13 @@ Repeat until a stop condition fires:
   implemented a slice also verify it — the independence is the whole reason this
   works. The engine refuses `verified --by builder`, but you must also not reuse
   the builder's context to verify.
-- **Cap the send-back cycle.** Before (re)building a `rejected` slice, read its
-  history (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" show <id>`) and count how
-  many times it has been `rejected` (by the verifier, or by a manual review). If that count ≥
-  `max-reject-retries`, STOP: `set-status <id> blocked --note "exceeded N
-  build/verify retries: <last failure>"` and hand to a human. Do not spin forever.
+- **Cap the send-back cycle, per run.** Keep a this-run rejection tally per slice,
+  starting at 0 when the loop starts; increment it each time a slice is rejected (by the
+  verifier, or by a manual review) **during this run**. Do **not** read the slice's
+  lifetime `rejections` from `show` — the budget is per run, so a re-run gets a fresh
+  one. When a slice's this-run tally reaches `max-reject-retries`, STOP:
+  `set-status <id> blocked --note "exceeded N build/verify retries this run: <last
+  failure>"` and hand to a human. Do not spin forever.
 - **`blocked` means stop, not skip.** If a builder or verifier sets a slice
   `blocked` (wrong/impossible contract, gates that genuinely can't go green), do
   **not** route around it — STOP and surface it. "Nothing actionable" while a slice

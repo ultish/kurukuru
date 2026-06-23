@@ -107,13 +107,33 @@ Then, in Claude Code:
 ```
 
 The first three steps need a human (discovery, scoping, slicing). Once slices have
-frozen contracts, the rest is mechanical. There are two ways to drive it:
+frozen contracts, the rest is mechanical. There are three ways to drive it:
 
-- **In-session:** `/kuru:loop` runs build → verify → done over the ready slices
-  until the board is clear (code review is opt-in — run `/kuru:review` by hand) —
-  good for watching it work or testing without the runner. To ship just **one** named
-  slice and stop there, use `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
-- **Headless / unattended:** [`runner.py`](runner.py) — see below.
+- **In-session (sequential):** `/kuru:loop` runs build → verify → done over the ready
+  slices, one at a time, until the board is clear (code review is opt-in — run
+  `/kuru:review` by hand). To ship just **one** named slice and stop there, use
+  `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
+- **Dynamic workflow (parallel):** `/kuru:loop-workflow` is the same build → verify →
+  ship loop over **every actionable slice at once**, but it authors a Claude Code
+  **dynamic workflow** — a JavaScript script you approve, which the workflow runtime runs
+  in the background. It asks the engine `kuru next --all` for the full ready set, shows you
+  the plan and dependency edges first, then runs a **per-slice promise-DAG pipeline**: a
+  planning agent reads `/kuru:status` once, then each slice gets its own driver that runs
+  `build → verify → ship` as fast as it can — each step a **fresh, isolated `agent()`** —
+  awaiting its dependency drivers first (the dependency graph becomes a promise graph, so a
+  dependent starts the instant its deps ship). That per-step clean context is the point: it
+  clears a large board without saturating the session, which is why it **supersedes the
+  headless `runner.py`**. The workflow's agents touch kuru only through `/kuru:build`,
+  `/kuru:verify`, `/kuru:ship --no-commit` (never `kuru.py`); slices share one tree and one
+  ledger (the engine serializes ledger writes with a file lock), and the methodology assumes
+  parallel-ready slices touch different areas. Ship defers its commit, so the launching
+  session makes **one commit after the run** (trading per-slice revert granularity for
+  parallel speed). `/kuru:loop-workflow SL-0002 5` scopes it to one slice with 5 retries.
+  (Requires Claude Code workflows enabled.)
+- **Headless / unattended:** [`runner.py`](runner.py) — sequential — see below.
+
+Across all three, `max-reject-retries` is **per run**: re-running a `loop*` command
+resets every slice's retry tally, so the cap governs only the current run.
 
 Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
 spawn a fresh builder and a separate verifier per slice, respect inter-slice
@@ -313,7 +333,10 @@ the builder — there is no `verified -> in_progress`.
 commits the working tree as one slice-sized commit — the code, the `.kuru/`
 artifacts, and the ledger transition together (`kuru: ship <id> — <title>`). It's
 best-effort: outside a git repo, or if `git commit` fails (no identity, a rejecting
-hook), the slice still lands `done` and the engine just warns.
+hook), the slice still lands `done` and the engine just warns. The exception is
+`set-status <id> done --no-commit`, which flips the ledger but skips the commit — used
+by `/kuru:loop-workflow`, where many slices ship into one shared tree and the driver
+commits once after the parallel run.
 
 A slice that shouldn't be built after all (wrong scope, superseded) is **dropped**
 (`kuru set-status <id> dropped --note "<why>"`) — `next` and the loop ignore it.
@@ -327,9 +350,9 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter prd slice build verify review status next bearings loop loop-slice
+├── commands/        init charter prd slice build verify review ship status next bearings loop loop-slice loop-workflow
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier
-├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice
+├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
 ├── scripts/selftest.sh  regression test for the engine's guarantees
 ├── scripts/smoke-headless.sh  proves /kuru:* resolves in a headless `claude -p` session
@@ -390,8 +413,10 @@ exposes:
   - /kuru:build       — kuru-builder implements the next ready slice
   - /kuru:verify      — kuru-verifier independently gatekeeps a built slice
   - /kuru:review      — optional code review before marking done
-  - /kuru:loop        — autonomous build→verify→done loop over all ready slices
-  - /kuru:loop-slice  — same loop scoped to a single named slice
+  - /kuru:ship        — mark a verified/reviewed slice done (auto-commits)
+  - /kuru:loop          — autonomous build→verify→done loop over all ready slices (sequential)
+  - /kuru:loop-slice    — same loop scoped to a single named slice
+  - /kuru:loop-workflow — parallel build→verify→ship over all ready slices, as a dynamic workflow
   - /kuru:next        — print and start the next actionable slice
   - /kuru:status      — delivery dashboard
   - /kuru:bearings    — session startup ritual (context-reset recovery)

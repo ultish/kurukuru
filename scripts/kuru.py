@@ -17,8 +17,8 @@ Usage:
   kuru ls [--status S]              list slices (table)
   kuru show <id>                    show one slice (paths + state + history)
   kuru next                         print the next actionable slice
-  kuru set-status <id> <status> [--note "..."] [--by agent|human]
-                                    (-> done auto-commits the working tree)
+  kuru set-status <id> <status> [--note "..."] [--by agent|human] [--no-commit]
+                                    (-> done auto-commits the working tree; --no-commit skips it)
   kuru gate <id>                    run the configured deterministic gates
   kuru check <id>                   print whether <id> may advance to 'verified'
   kuru doctor                       sanity-check the .kuru workspace
@@ -32,6 +32,7 @@ Statuses (the slice state machine):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -40,6 +41,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from collections import deque
 from pathlib import Path
 
@@ -139,6 +141,41 @@ def load_ledger() -> dict:
 
 def save_ledger(led: dict) -> None:
     save_json(ledger_path(), led)
+
+
+@contextlib.contextmanager
+def ledger_lock(timeout: float = 60.0):
+    """Serialize ledger read-modify-write across concurrent kuru.py processes.
+
+    `set-status` is load -> mutate -> save (plus, for `done`, a git commit); two of
+    them racing would lose a write or interleave commits. `/kuru:loop-workflow` runs
+    several builders/verifiers at once, each calling `set-status`, so the mutation
+    must be serialized. This is an advisory file lock (stdlib only). On platforms
+    without fcntl (Windows) it degrades to a no-op — kurukuru targets Unix shells.
+    Reads (`next`, `ls`, `show`) don't take the lock: `save_json` swaps the file in
+    atomically with `os.replace`, so a reader always sees a complete ledger."""
+    lock_path = kuru_dir() / ".ledger.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    fh = open(lock_path, "w")
+    try:
+        if fcntl is not None:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        die("could not acquire .kuru/.ledger.lock within "
+                            f"{timeout:.0f}s — another kuru process is holding it.")
+                    time.sleep(0.05)
+        yield
+    finally:
+        fh.close()
 
 
 def get_slice(led: dict, sid: str) -> dict | None:
@@ -344,7 +381,7 @@ def cmd_init(args):
         "init.sh": render(read_template("init.sh"), PROJECT=root.name),
         # .kuru/ is meant to be committed (it's the project's delivery memory);
         # this excludes only the machine-local bits.
-        ".gitignore": "# machine-local — do not commit\nengine\nslices/*/gate-*.log\n",
+        ".gitignore": "# machine-local — do not commit\nengine\n.ledger.lock\nslices/*/gate-*.log\n",
     }
     for name, content in seed.items():
         path = kd / name
@@ -586,6 +623,53 @@ def cmd_next(args):
         emit_action(s)
         return
 
+    # Whole-batch query: every slice actionable *right now* (for a parallel driver
+    # like /kuru:loop-workflow), not just the single board pick. Same pipeline order
+    # and dependency rule as pick_next, but it returns the full set plus what is
+    # waiting/draft/blocked/done so the caller can show a plan before starting.
+    if getattr(args, "all", False):
+        order = ["verifying", "built", "rejected", "in_progress", "ready", "verified", "reviewed"]
+        actionable, waiting = [], []
+        for st in order:
+            for s in [x for x in led["slices"] if x["status"] == st]:
+                if st == "ready":
+                    unmet = unmet_deps(led, s)
+                    if unmet:
+                        waiting.append({"id": s["id"], "title": s["title"], "unmet": unmet})
+                        continue
+                actionable.append({
+                    "next_action": STATUS_ACTION[s["status"]], "id": s["id"],
+                    "status": s["status"], "title": s["title"], "epic": s.get("epic"),
+                    "target": s.get("target"), "depends_on": deps_of(s),
+                    "label": label[s["status"]],
+                    "dir": str(kuru_dir() / "slices" / s["id"]),
+                })
+        draft = [{"id": x["id"], "title": x["title"]} for x in led["slices"] if x["status"] == "draft"]
+        blocked = [x["id"] for x in led["slices"] if x["status"] == "blocked"]
+        done = [x["id"] for x in led["slices"] if x["status"] == "done"]
+        if use_json:
+            print(json.dumps({"actionable": actionable, "waiting": waiting,
+                              "draft": draft, "blocked": blocked, "done": done}))
+            return
+        if actionable:
+            print(f"Actionable now ({len(actionable)}) — can run in parallel:")
+            for a in actionable:
+                dep = f"  (deps: {', '.join(a['depends_on'])})" if a["depends_on"] else ""
+                print(f"  {a['id']}  [{a['status']}] -> {a['next_action']}{dep}  {a['title']}")
+        else:
+            print("Nothing actionable right now.")
+        if waiting:
+            print("Waiting on dependencies (will unlock as deps finish):")
+            for w in waiting:
+                print(f"  {w['id']} <- {', '.join(w['unmet'])}  {w['title']}")
+        if draft:
+            print("Draft — need a human to contract (/kuru:slice):")
+            for d in draft:
+                print(f"  {d['id']}  {d['title']}")
+        if blocked:
+            print(f"Blocked — need a human: {', '.join(blocked)}")
+        return
+
     s = pick_next(led)
 
     if s is None:
@@ -616,6 +700,14 @@ def cmd_next(args):
 
 
 def cmd_set_status(args):
+    # Hold the ledger lock across the whole load -> mutate -> save (-> commit) so
+    # parallel loop-workflow transitions can't clobber each other or interleave
+    # auto-commits. die()/sys.exit() raise through the `with`, releasing the lock.
+    with ledger_lock():
+        _set_status_impl(args)
+
+
+def _set_status_impl(args):
     led = load_ledger()
     s = get_slice(led, args.id)
     if not s:
@@ -659,7 +751,10 @@ def cmd_set_status(args):
     save_ledger(led)
     print(f"{s['id']}: {cur} -> {new}")
     if new == "done":
-        _commit_slice(s)
+        if getattr(args, "no_commit", False):
+            print(f"  (--no-commit: {s['id']} is done in the ledger; commit deferred to the caller)")
+        else:
+            _commit_slice(s)
 
 
 def _commit_slice(s: dict) -> None:
@@ -854,7 +949,7 @@ def cmd_doctor(args):
     if not root:
         die("no .kuru workspace found here.")
     kd = root / ".kuru"
-    problems = []
+    problems, warnings = [], []
     for f in ("config.json", "ledger.json", "charter.md", "progress.md"):
         if not (kd / f).exists():
             problems.append(f"missing {f}")
@@ -871,7 +966,11 @@ def cmd_doctor(args):
                     problems.append(f"target '{tname}' has no gates configured")
             tdir = (root / t["dir"]).resolve()
             if not tdir.is_dir():
-                problems.append(f"target '{tname}' dir '{t['dir']}' does not exist under {root}")
+                # A target dir that a not-yet-built slice will create is normal early on
+                # — warn, don't fail. `kuru gate` still hard-errors if it's missing at
+                # build time, when the dir genuinely must exist.
+                warnings.append(f"target '{tname}' dir '{t['dir']}' does not exist yet "
+                                f"under {root} (a slice may create it)")
         if cfg.get("targets") and cfg.get("gates"):
             problems.append("config.json has both top-level `gates` and `targets`; the "
                             "top-level `gates` is ignored — move it into a target or remove it")
@@ -902,8 +1001,12 @@ def cmd_doctor(args):
         print("Problems found:")
         for p in problems:
             print(f"  ✗ {p}")
+        for w in warnings:
+            print(f"  ⚠ {w}")
         sys.exit(1)
     print(f"OK — Kurukuru workspace healthy at {kd}")
+    for w in warnings:
+        print(f"  ⚠ {w}")
 
 
 # --------------------------------------------------------------------------- #
@@ -952,11 +1055,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--slice", default=None, metavar="ID",
                    help="action for this one slice only (for single-slice loops), "
                         "not the board's next pick.")
+    s.add_argument("--all", action="store_true",
+                   help="list EVERY slice actionable right now (deps satisfied), not just "
+                        "the single next pick — the parallel batch for /kuru:loop-workflow. "
+                        "Also reports waiting/draft/blocked/done.")
     s.set_defaults(fn=cmd_next)
 
     s = sub.add_parser("set-status"); s.add_argument("id"); s.add_argument("status")
     s.add_argument("--note", default=""); s.add_argument("--by", default="human",
                                                          choices=["human", "builder", "verifier", "planner", "reviewer"])
+    s.add_argument("--no-commit", dest="no_commit", action="store_true",
+                   help="for `done`: flip the ledger only, skip the auto-commit (the caller commits later — "
+                        "used by /kuru:loop-workflow, which commits once after the parallel run)")
     s.set_defaults(fn=cmd_set_status)
 
     s = sub.add_parser("gate"); s.add_argument("id"); s.set_defaults(fn=cmd_gate)

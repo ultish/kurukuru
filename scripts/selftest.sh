@@ -181,6 +181,30 @@ echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "
   && ok "verified slice surfaces via next (action ship)" || fail "verified not shippable: $nx"
 expect_ok "verified->done allowed directly (review opt-in)" $KURU set-status SL-0001 done
 
+echo "== ship: default auto-commits; --no-commit defers the commit to the caller =="
+# Default ship: done auto-commits the working tree.
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+drive_to_verified
+git add -A >/dev/null && git commit -q -m base    # baseline so HEAD exists and tree is clean
+echo dirty > artifact.txt                          # an uncommitted change in the tree
+before="$(git rev-parse HEAD)"
+$KURU set-status SL-0001 done >/dev/null
+[ "$before" != "$(git rev-parse HEAD)" ] && ok "default ship: auto-commit advanced HEAD" || fail "default ship did not commit"
+[ -z "$(git status --porcelain)" ] && ok "default ship: working tree clean after commit" || fail "default ship left tree dirty"
+
+# --no-commit ship: flips the ledger to done but makes no commit; the caller commits later.
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+drive_to_verified
+git add -A >/dev/null && git commit -q -m base
+echo dirty > artifact.txt
+before="$(git rev-parse HEAD)"
+$KURU set-status SL-0001 done --no-commit >/dev/null
+[ "$before" = "$(git rev-parse HEAD)" ] && ok "--no-commit: HEAD did not advance" || fail "--no-commit still committed"
+git status --porcelain | grep -q artifact.txt && ok "--no-commit: tree left dirty for the caller to commit" || fail "--no-commit unexpectedly committed the tree"
+$KURU ls --status done | grep -q SL-0001 && ok "--no-commit: slice is still done in the ledger" || fail "--no-commit did not set done"
+
 echo "== next --slice: single-slice focus, independent of the board's ranking =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates
@@ -381,6 +405,56 @@ expect_ok "reviewed"   $KURU set-status SL-0001 reviewed --by reviewer
 expect_ok "done"       $KURU set-status SL-0001 done
 expect_fail "shipped (done) work cannot be dropped" "illegal transition" $KURU set-status SL-0001 dropped
 $KURU ls --status done | grep -q SL-0001 && ok "board ends all-done" || fail "slice not done"
+
+echo "== doctor: a not-yet-created target dir warns, doesn't fail =="
+newrepo >/dev/null
+$KURU init >/dev/null
+# a target whose dir no slice has created yet (a `dir` is only honored inside `targets`)
+printf '{"project":"t","targets":{"web":{"dir":"app/web","gates":{"unit":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+out="$($KURU doctor 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok "doctor still exits 0 with a missing target dir" || fail "doctor failed on a missing dir (rc=$rc): $out"
+case "$out" in *"does not exist yet"*) ok "doctor warns about the missing dir" ;; *) fail "no warning emitted: $out" ;; esac
+# but a real problem (a target with no gates) is still a hard failure
+printf '{"project":"t","targets":{"web":{"dir":".","gates":{}}}}\n' > .kuru/config.json
+expect_fail "doctor still hard-fails on no gates" "no gates configured" $KURU doctor
+
+echo "== next --all: the parallel actionable batch =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "A" >/dev/null            # SL-0001
+$KURU new-slice "B" --depends-on SL-0001 >/dev/null   # SL-0002 (dep on A)
+$KURU new-slice "C" >/dev/null            # SL-0003
+$KURU set-status SL-0001 ready >/dev/null
+$KURU set-status SL-0003 ready >/dev/null
+$KURU set-status SL-0002 ready >/dev/null   # ready but dep SL-0001 not done -> waiting
+allj="$($KURU next --all --json)"
+echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); a={x['id'] for x in d['actionable']}; sys.exit(0 if a=={'SL-0001','SL-0003'} else 1)" \
+  && ok "next --all lists both independent ready slices (not just the first)" || fail "actionable set wrong: $allj"
+echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); w=d['waiting']; sys.exit(0 if any(x['id']=='SL-0002' and x['unmet']==['SL-0001'] for x in w) else 1)" \
+  && ok "next --all reports a dep-blocked ready slice under waiting" || fail "waiting set wrong: $allj"
+# finish A; B should now become actionable, A leaves the actionable set
+drive_to_verified >/dev/null 2>&1   # drives SL-0001 to verified
+$KURU set-status SL-0001 done >/dev/null
+allj="$($KURU next --all --json)"
+echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); a={x['id'] for x in d['actionable']}; sys.exit(0 if 'SL-0002' in a and 'SL-0001' not in a else 1)" \
+  && ok "next --all unlocks a dependent once its dep is done" || fail "dependent not unlocked: $allj"
+
+echo "== ledger lock: concurrent set-status writes all survive =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+for i in 1 2 3 4 5 6; do $KURU new-slice "S$i" >/dev/null; done
+if python3 - <<PY
+import subprocess, sys, json
+K = "$ROOT/scripts/kuru.py"
+ids = [f"SL-{n:04d}" for n in range(1,7)]
+procs = [subprocess.Popen([sys.executable, K, "set-status", i, "ready"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for i in ids]
+for p in procs: p.wait()
+d = json.load(open(".kuru/ledger.json"))
+ready = sum(1 for s in d["slices"] if s["status"]=="ready")
+sys.exit(0 if ready==6 and len(d["slices"])==6 else 1)
+PY
+then ok "6 concurrent set-status writes all landed (lock held)"; else fail "ledger race: a concurrent write was lost"; fi
 
 echo
 echo "ALL PASS ($pass checks)"

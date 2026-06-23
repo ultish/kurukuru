@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-23
+
+### Added
+- **`/kuru:loop-workflow` — drive the whole board as a Claude Code dynamic workflow.** A
+  new parallel driver that works **every actionable slice at once** (dependencies
+  satisfied) through build → verify → ship. Instead of orchestrating subagents inside the
+  session, it **authors a JavaScript dynamic-workflow script** (the user approves it; the
+  workflow runtime runs it in the background) so each build/verify/ship runs in its **own
+  fresh, isolated context** — clearing a large board without saturating the session. The
+  script is a **per-slice promise-DAG pipeline**: a planning agent reads `/kuru:status`
+  once, then each slice gets its own driver that runs build → verify → ship as fast as it
+  can, `await`ing its dependency drivers first (the kuru dependency graph becomes a promise
+  graph, so a dependent starts the instant its deps ship — no rounds, no polling). The kuru
+  state machine routes retries (a rejected slice loops back to build). The workflow's agents
+  touch kuru only through `/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit` — never
+  `kuru.py`. This **supersedes the headless `runner.py`** for context-isolated parallel
+  driving. Requires Claude Code workflows enabled. Scope it to one slice with
+  `/kuru:loop-workflow SL-0002 5` (5 retries). The deep guidance + reference script live in
+  the new `loop-workflow` skill.
+- **`/kuru:ship <id> [--no-commit]` — a thin command for the terminal transition.** Marks a
+  `verified`/`reviewed` slice `done`, wrapping `set-status <id> done`. By default it
+  auto-commits; with `--no-commit` it flips the ledger only (deferring the commit), which is
+  what `/kuru:loop-workflow` uses so it can ship many slices into one tree and commit once
+  after the run. Exists so the workflow's agents have a `/kuru:*` verb for the ship step
+  (they can't run `kuru.py`); humans can still run `set-status` directly.
+- **`kuru set-status … done --no-commit` — flip the ledger without committing.** Lets a
+  caller take `done` transitions without the best-effort auto-commit, then commit once
+  itself. The default (commit) is unchanged for humans and the sequential loops.
+- **`kuru next --all` — the whole actionable batch.** Returns *every* slice actionable
+  right now (deps satisfied), in pipeline order, plus `waiting` / `draft` / `blocked` /
+  `done` — the batch `/kuru:loop-workflow` drives on (text or `--json`).
+- **Ledger lock for safe parallelism.** `set-status` now holds an advisory file lock
+  (`.kuru/.ledger.lock`, stdlib only) across its load → mutate → save (→ auto-commit), so
+  concurrent transitions from parallel builders/verifiers can't clobber the ledger or
+  interleave commits. Reads stay lock-free (writes swap in atomically).
+
+### Changed
+- **`kuru doctor`: a missing target `dir` is now a warning, not a failure.** A slice that
+  hasn't been built yet may be the thing that *creates* its target directory, so doctor
+  ⚠-warns about a not-yet-existing `dir` and still reports the workspace healthy (exit 0).
+  Genuine problems (missing core files, no gates, unknown/dropped deps) remain hard ✗
+  failures, and `kuru gate` still hard-errors if the dir is missing at build time.
+- **`/kuru:status` now shows dependency chains.** It runs `kuru next --all` (not plain
+  `next`) and presents the actionable / waiting-on-deps / draft / blocked grouping with the
+  `(deps: …)` edges, so a reader — or the `/kuru:loop-workflow` coordinator — can see what
+  can run in parallel now and what is still gated.
+- **`max-reject-retries` is now per run** across `/kuru:loop`, `/kuru:loop-slice`, and
+  `/kuru:loop-workflow`. Each command starts every slice's rejection tally at 0, so
+  re-running a `loop*` command resets the retry budget — the cap governs only the current
+  run, not the slice's lifetime `rejections`.
+
 ## [0.7.0] - 2026-06-20
 
 ### Changed
@@ -321,7 +372,8 @@ Initial release of the kurukuru enterprise delivery harness.
 - **Self-checks:** `scripts/selftest.sh` (engine guarantees) and
   `scripts/smoke-headless.sh` (proves `/kuru:*` resolves in a headless session).
 
-[Unreleased]: https://example.com/kurukuru/compare/v0.5.0...HEAD
+[Unreleased]: https://example.com/kurukuru/compare/v1.0.0...HEAD
+[1.0.0]: https://example.com/kurukuru/compare/v0.7.0...v1.0.0
 [0.5.0]: https://example.com/kurukuru/compare/v0.4.0...v0.5.0
 [0.4.0]: https://example.com/kurukuru/compare/v0.3.1...v0.4.0
 [0.3.1]: https://example.com/kurukuru/compare/v0.3.0...v0.3.1
