@@ -456,5 +456,130 @@ sys.exit(0 if ready==6 and len(d["slices"])==6 else 1)
 PY
 then ok "6 concurrent set-status writes all landed (lock held)"; else fail "ledger race: a concurrent write was lost"; fi
 
+echo "== loop-workflow: reference round-loop logic (mock agents) =="
+# The /kuru:loop-workflow reference script (a JS template embedded in
+# skills/loop-workflow/SKILL.md) is run by the Claude Code Workflow runtime, not by
+# kuru.py — so the engine selftest can't reach it directly. Here we EXTRACT that script,
+# wrap it, and drive it against mock agent()/parallel() to assert the phase-barriered
+# round loop: clean flow, cross-round dependency ordering, retry-under-cap, cap exhaustion,
+# scoped-mode dead deps, blocked propagation, and pre-existing built/verified states.
+# Skipped (not failed) where `node` is unavailable — the engine stays stdlib-Python-only.
+if command -v node >/dev/null 2>&1; then
+  wf="$(mktemp -d)/wf.mjs"
+  python3 - "$ROOT" "$wf" <<'PY'
+import re, sys
+root, out = sys.argv[1], sys.argv[2]
+src = open(root + '/skills/loop-workflow/SKILL.md').read()
+body = re.search(r'```javascript\n(.*?)\n```', src, re.S).group(1)
+body = re.sub(r'export const meta = \{.*?\n\}\n', '', body, count=1, flags=re.S)
+wrapped = "async function run(args, agent, parallel){\n" + body + "\n}\n"
+harness = r'''
+const parallel = async (thunks) =>
+  Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
+function makeAgent(scn) {
+  const calls = [], vcount = {}
+  const agent = async (prompt) => {
+    if (prompt.includes('/kuru:status')) return scn.plan
+    const m = prompt.match(/\/kuru:(build|verify|ship)\s+(SL-[\w-]+)/)
+    const cmd = m[1], id = m[2]
+    calls.push(cmd + ':' + id)
+    const sc = (scn.scripts && scn.scripts[id]) || {}
+    if (cmd === 'build') return { id, status: sc.buildBlocked ? 'blocked' : 'built' }
+    if (cmd === 'verify') {
+      vcount[id] = (vcount[id] || 0) + 1
+      if (sc.verifyBlocked) return { id, status: 'blocked' }
+      if (sc.alwaysReject) return { id, status: 'rejected' }
+      if (sc.rejectTimes && vcount[id] <= sc.rejectTimes) return { id, status: 'rejected' }
+      return { id, status: 'verified' }
+    }
+    if (cmd === 'ship') return { id, status: 'done' }
+  }
+  return { agent, calls }
+}
+let fails = 0
+const eq = (name, got, want) => {
+  if (JSON.stringify(got) === JSON.stringify(want)) console.log('  ok: round-loop ' + name)
+  else { fails++; console.error('  FAIL: round-loop ' + name +
+    '\n        got ' + JSON.stringify(got) + '\n        want ' + JSON.stringify(want)) }
+}
+const S = (a) => [...a].sort()
+const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], draftIds: [], ...extra })
+;(async () => {
+  { // A: three independent slices flow clean -> all ship in round 1
+    const { agent } = makeAgent({ plan: plan([
+      { id: 'SL-01', status: 'ready', dependsOn: [] },
+      { id: 'SL-02', status: 'ready', dependsOn: [] },
+      { id: 'SL-03', status: 'ready', dependsOn: [] }]) })
+    const o = await run({}, agent, parallel)
+    eq('A: independent slices all ship', S(o.shipped), ['SL-01','SL-02','SL-03'])
+    eq('A: nothing stuck/capped', [o.capped.length, o.stuck.length], [0,0])
+  }
+  { // B: dependency chain B->A; A must build+ship before B builds
+    const { agent, calls } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'ready', dependsOn: [] },
+      { id: 'SL-B', status: 'ready', dependsOn: ['SL-A'] }]) })
+    const o = await run({}, agent, parallel)
+    eq('B: chain both ship', S(o.shipped), ['SL-A','SL-B'])
+    eq('B: A ships before B builds (cross-round dep order)',
+       calls.indexOf('ship:SL-A') < calls.indexOf('build:SL-B'), true)
+  }
+  { // C: one verify-reject under cap(2) -> retries and ships; build runs twice
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { rejectTimes: 1 } } })
+    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    eq('C: ships after a retry', o.shipped, ['SL-A'])
+    eq('C: rebuilt once (build ran twice)', calls.filter((c) => c === 'build:SL-A').length, 2)
+  }
+  { // D: verify always rejects -> capped, never ships
+    const { agent } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { alwaysReject: true } } })
+    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    eq('D: exhausted retries -> capped', o.capped, ['SL-A'])
+    eq('D: capped slice did not ship', o.shipped, [])
+  }
+  { // E: scoped to [B] only, B depends on out-of-scope A -> B stuck
+    const { agent } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'ready', dependsOn: [] },
+      { id: 'SL-B', status: 'ready', dependsOn: ['SL-A'] }]) })
+    const o = await run({ slices: ['SL-B'] }, agent, parallel)
+    eq('E: scoped slice with dead dep is stuck',
+       o.stuck, [{ id: 'SL-B', reason: 'a dependency cannot ship in this run' }])
+    eq('E: nothing shipped', o.shipped, [])
+  }
+  { // F: A build->blocked stops its dependent B
+    const { agent } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'ready', dependsOn: [] },
+      { id: 'SL-B', status: 'ready', dependsOn: ['SL-A'] }]),
+      scripts: { 'SL-A': { buildBlocked: true } } })
+    const o = await run({}, agent, parallel)
+    eq('F: blocked slice reported blocked', o.stuck.find((x) => x.id === 'SL-A').reason, 'blocked')
+    eq('F: dependent of a blocked slice is stuck',
+       o.stuck.find((x) => x.id === 'SL-B').reason, 'a dependency cannot ship in this run')
+  }
+  { // G: pre-existing states - 'built' enters at verify, 'verified' enters at ship
+    const { agent, calls } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'built', dependsOn: [] },
+      { id: 'SL-B', status: 'verified', dependsOn: [] }]) })
+    const o = await run({}, agent, parallel)
+    eq('G: pre-built/pre-verified both ship', S(o.shipped), ['SL-A','SL-B'])
+    eq('G: no spurious re-build of a built/verified slice',
+       calls.some((c) => c === 'build:SL-A' || c === 'build:SL-B'), false)
+  }
+  process.exit(fails ? 1 : 0)
+})()
+'''
+open(out, 'w').write(wrapped + harness)
+PY
+  if hout="$(node "$wf" 2>&1)"; then
+    echo "$hout"
+    pass=$((pass + $(printf '%s\n' "$hout" | grep -c '^  ok:' || true)))
+  else
+    echo "$hout" >&2
+    fail "loop-workflow reference round-loop logic (see FAIL lines above)"
+  fi
+else
+  echo "  -- skipped: node not found (reference script is JS run by the Workflow runtime)"
+fi
+
 echo
 echo "ALL PASS ($pass checks)"

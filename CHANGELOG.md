@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-24
+
+### Added
+- **`/kuru:loop-workflow` now takes a curated parallel set.** Pass a comma-separated list of
+  slice ids — `/kuru:loop-workflow SL-0001,SL-0002,SL-0011 5` — to drive **only** those slices
+  (the integer is still the per-run reject cap). A single id is the degenerate single-slice case;
+  omit the scope for the whole board. Internally this is `args.slices` (an array; the former
+  single-id `args.slice` is folded in). Scoped mode lets **you** assert which slices are safe to
+  run together — the principled way to get single-project parallelism without worktrees, since
+  you pick file-disjoint slices. Named ids that aren't actionable (already `done`, `draft`,
+  `blocked`, or unknown) come back in `requestedUnavailable` with a reason, and a named slice
+  whose dependency isn't in the set (and isn't `done`) is reported rather than silently pulled in.
+- **Regression coverage for the loop-workflow reference script.** `scripts/selftest.sh` now
+  extracts the JS round-loop template from the `loop-workflow` skill and drives it against mock
+  `agent()`/`parallel()` to assert clean flow, cross-round dependency ordering, retry-under-cap,
+  cap exhaustion, scoped dead-deps, blocked propagation, and pre-existing `built`/`verified`
+  states. Skipped (not failed) where `node` is unavailable — the engine stays stdlib-Python-only.
+
+### Changed
+- **`/kuru:loop-workflow` drives phase-barriered rounds, not a per-slice promise-DAG pipeline
+  (correctness fix).** The previous pipeline let a slice reach `verify` while others were still in
+  `build`; because `verify` re-runs the gates and drives the running app against the **whole
+  shared tree**, an in-flight build contaminated a concurrent verify *even when the slices touched
+  disjoint files*. The loop now runs one phase at a time with many slices per phase: build every
+  build-ready slice in parallel → **barrier** → verify every built slice in parallel → **barrier**
+  → ship every verified slice (`--no-commit`). Each round's ships unlock dependents for the next
+  round; a `rejected` slice re-enters the next round's build phase (per-run cap unchanged). Ship
+  stays a tree-safe, lock-serialized ledger flip — barriered only for code simplicity, not safety.
+- **Explicit "no git worktrees" constraint in loop-workflow.** The design and reference script now
+  state, in several places, that every agent shares one working tree so they read/write the same
+  `ledger.json`; a worktree would fork the in-tree ledger and break cross-slice coordination, so
+  agents never set `isolation: 'worktree'`.
+
 ## [1.0.0] - 2026-06-23
 
 ### Added

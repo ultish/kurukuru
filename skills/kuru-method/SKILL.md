@@ -58,21 +58,23 @@ use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
 <id>` (so it can't drift onto a ready sibling the board would rank first). To work
 **several independent slices in parallel**, use `/kuru:loop-workflow` — it authors a
 Claude Code **dynamic workflow** (a JS script the user approves and the workflow runtime
-runs in the background) as a **per-slice promise-DAG pipeline**: a planning agent reads
-`/kuru:status` once, then each slice gets its own driver that runs `build → verify → ship`
-as fast as it can — each step a **fresh, isolated `agent()`** — `await`ing its dependency
-drivers first (the dependency graph becomes a promise graph, so a dependent starts the
-instant its deps ship). That per-step clean context is the point: it clears a large board
-without saturating the session, which is why it supersedes the headless `runner.py`. The
-workflow's agents touch kuru only through the `/kuru:*` commands (`/kuru:build`,
-`/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py` directly, so the "only `kuru.py`
-mutates the ledger" rule holds; the engine serializes ledger writes with a file lock
-(`.kuru/.ledger.lock`) and the methodology guarantees independence — parallel-ready slices
-have no dependency between them. Ship defers its commit (`--no-commit`); the launching
-session makes **one commit after the run** instead of one per slice — trading per-slice
-revert granularity for parallel speed. See the `loop-workflow` skill for the design and the
-reference script. Across all three drivers,
-`max-reject-retries` is **per run** (a re-run resets every slice's tally).
+runs in the background) that drives **phase-barriered rounds**: a planning agent reads
+`/kuru:status` once, then each round builds every build-ready slice in parallel, **waits for
+all builds (barrier)**, verifies every built slice in parallel, **barrier**, then ships every
+verified slice — each step a **fresh, isolated `agent()`**. The barrier is load-bearing:
+slices share one working tree, and `verify` re-runs the gates and drives the app against the
+*whole* tree, so a build still in flight would contaminate a concurrent verify *even on
+disjoint files*. Each round's ships unlock dependents for the next round. That per-step clean
+context is the point: it clears a large board without saturating the session, which is why it
+supersedes the headless `runner.py`. The workflow's agents touch kuru only through the
+`/kuru:*` commands (`/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py`
+directly, so the "only `kuru.py` mutates the ledger" rule holds; the engine serializes ledger
+writes with a file lock (`.kuru/.ledger.lock`). Ship defers its commit (`--no-commit`); the
+launching session makes **one commit after the run** instead of one per slice — trading
+per-slice revert granularity for parallel speed. Scope it to a curated set
+(`/kuru:loop-workflow SL-0001,SL-0002`) or omit for the whole board. See the `loop-workflow`
+skill for the design and the reference script. `max-reject-retries` is **per run** (a re-run
+resets every slice's tally).
 
 ## The slice state machine (enforced by kuru.py)
 
