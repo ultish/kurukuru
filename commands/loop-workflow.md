@@ -1,14 +1,14 @@
 ---
-description: Drive ready slices through build→verify→ship IN PARALLEL by authoring and launching a Claude Code dynamic workflow — fresh context per build/verify/ship, so the board clears without saturating this session. Optionally scope to a single slice or a comma-separated set of slices.
+description: Drive ready slices through PER-SLICE build→verify→ship pipelines by authoring and launching a Claude Code dynamic workflow — same-target slices serialize (one shared tree), different-target slices run in parallel, all dependency-ordered. Fresh context per build/verify/ship. Optionally scope to a single slice or a comma-separated set.
 argument-hint: "[slice-id | id1,id2,... ] [max-reject-retries, default 2]"
 ---
 
 Use the `loop-workflow` skill for context — it holds the full design and the reference script.
 
-This is the **parallel** autonomous driver. It runs the mechanical `build → verify → ship` part
-of the pipeline over **every slice that is actionable right now** (dependencies satisfied), but
-unlike `/kuru:loop` it does so as a **Claude Code dynamic workflow**: you author a JavaScript
-orchestration script, the user approves it, and the workflow runtime runs each phase as a fresh,
+This is the **per-slice-pipeline** autonomous driver. It runs the mechanical `build → verify →
+ship` part of the pipeline over the actionable slices (dependencies satisfied), but unlike
+`/kuru:loop` it does so as a **Claude Code dynamic workflow**: you author a JavaScript
+orchestration script, the user approves it, and the workflow runtime runs each stage as a fresh,
 isolated `agent()`. That per-step clean context is the point — it's why this can clear a large
 board without the orchestrator's context degrading, and why it supersedes `runner.py`.
 
@@ -20,9 +20,10 @@ straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
 
 1. **Check preconditions** (below). If any fail, STOP and name the command to run.
 2. **Read the board:** `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next --all`.
-   Present a short **plan** first — actionable-now (with next action + `depends_on`), waiting-on-
-   deps (and which deps), draft/blocked — so the user sees the parallel set and the dependency
-   edges before anything runs.
+   Present a short **plan** first — actionable-now (with next action, `depends_on`, **and gate
+   target**), waiting-on-deps (and which deps), draft/blocked — so the user sees which slices will
+   run in parallel (different targets) vs serialize (same target) and the dependency edges before
+   anything runs.
 3. **Author the workflow script** per the `loop-workflow` skill's reference shape, parameterized
    to this board and to `$ARGUMENTS` (passed as the workflow's `args`). **Critical**: agents must
    NOT use `isolation: 'worktree'` — they all run in the same project tree to read/write the
@@ -36,15 +37,18 @@ straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
 4. **After the workflow returns, commit once** (see Termination & reporting) — the run's shipped
    slices are `done` in the ledger but not yet committed.
 
-The script (see skill) drives **phase-barriered rounds**, NOT a per-slice pipeline: a planning
-agent reads `/kuru:status` once, then each round builds every build-ready slice in parallel,
-**waits for all builds (barrier)**, verifies every built slice in parallel, **barrier**, then
-ships every verified slice (`/kuru:ship <id> --no-commit`). The barrier is load-bearing — slices
-share **one working tree**, and `verify` re-runs the gates and drives the app against the *whole*
-tree, so a build still in flight would contaminate a concurrent verify *even on disjoint files*.
-Each round's ships unlock dependents for the next round; a rejected slice re-enters the next
-round's build phase. The per-run reject cap and the blocked-stops-a-slice-and-its-dependents rule
-are enforced in the script.
+The script (see skill) drives **one `build → verify → ship` pipeline per slice**, keyed on the
+**gate target** for concurrency: a planning agent reads `/kuru:status` once (each slice's status,
+`depends_on`, and **target**), then a target-mutex scheduler runs each slice's pipeline as fresh,
+isolated `agent()`s. **Same target → serialized** (a target runs at most one slice's pipeline at a
+time — the no-worktrees lesson: parallel builds on one shared tree clobber each other and a
+build-in-flight contaminates a same-tree verify). **Different target → parallel** (disjoint
+subtrees can't contaminate each other). **Dependency-ordered**: a slice starts only once all its
+`depends_on` are `done`, so a dependent begins the instant its last dep ships — not a phase later.
+A `rejected` verdict loops the slice back through build **within its own pipeline** (capped by its
+per-run tally); the reject cap and the blocked-stops-a-slice-and-its-dependents rule are enforced
+in the script. A single-target repo therefore runs fully sequentially (correct — you can't safely
+parallelize one tree without worktrees); a polyglot/monorepo runs one pipeline per app at once.
 
 ## Arguments (`$ARGUMENTS`)
 
@@ -52,9 +56,10 @@ Parse up to two tokens, in any order, and pass them through as the workflow's `a
 
 - A **slice scope** — one slice id, or a **comma-separated list** of ids (`SL-####`,
   case-insensitive, **no spaces inside the list**) → **scoped mode** (`args.slices`, an array):
-  drive only the named slices, in the same phase-barriered rounds as whole-board mode. A
-  single id is the degenerate **single-slice** case (no parallelism), like `/kuru:loop-slice`.
-  Omit the scope entirely to drive the **whole board**.
+  drive only the named slices, under the same target-keyed concurrency as whole-board mode —
+  named slices on **different** gate targets run in parallel, named slices on the **same** target
+  serialize. A single id is the degenerate **single-slice** case. Omit the scope entirely to drive
+  the **whole board**.
 - A bare **integer** → **`args.maxRejectRetries`** (default **2**): how many times a slice may be
   rejected/sent-back **in this run** before the workflow stops driving it and surfaces it.
 
@@ -62,13 +67,12 @@ So: `/kuru:loop-workflow` · `/kuru:loop-workflow 5` · `/kuru:loop-workflow SL-
 `/kuru:loop-workflow SL-0002 5` · `/kuru:loop-workflow SL-0001,SL-0002,SL-0011` ·
 `/kuru:loop-workflow SL-0001,SL-0002,SL-0011 5`.
 
-**Scoped mode = you curate a parallel set.** You, not the engine, assert the named slices are
-safe to run together. On a single-project shared tree that means **they must touch disjoint
-files** — parallel builds share one working tree, so overlapping edits clobber each other (and
-contaminate each verify, which runs the gates over the whole tree). Slices that really overlap
-belong in separate launches, or in sequential `/kuru:loop`. A dependency of a named slice that
-isn't itself in the set must already be `done`, or that slice can't ship (the workflow reports it
-rather than silently pulling the dep in).
+**Scoped mode — concurrency is keyed on the gate target, not on you.** You do **not** have to
+assert the named slices touch disjoint files: the script serializes same-target slices for you and
+only parallelizes across targets (disjoint subtrees by definition). So `SL-0001,SL-0002` on two
+different apps run in parallel; on the same app they run one after the other. The one thing you
+must ensure: a dependency of a named slice that isn't itself in the set must already be `done`, or
+that slice can't ship (the workflow reports it rather than silently pulling the dep in).
 
 **Retries are per-run.** Each launch starts every slice's tally at 0 — re-launching resets the
 budget. Do not read the lifetime `rejections` from `show`.

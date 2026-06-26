@@ -53,11 +53,21 @@ Operating rules:
    `cat > .kuru/slices/<id>/verification.md <<'EOF'` … `EOF`. Use a quoted
    `'EOF'` delimiter so backticks and `$` in your pasted evidence aren't mangled.
 
-**Verdict:**
+**Verdict — recording it IS the job, not a formality:**
 - All criteria PASS + gates green → `kuru set-status <id> verified --by verifier`.
 - Anything fails → `kuru set-status <id> rejected --by verifier` with a note
   stating exactly what failed, specific enough to act on without re-reading the
   report.
+
+**You are not finished until `kuru show <id>` reports `verified` or `rejected`.** A
+verdict you only stated in prose, or wrote into `verification.md`, but did **not**
+record with `set-status`, does not exist — the slice is still `verifying`, the gate
+has not moved, and your whole run (gates, integration scripts, evidence) gets thrown
+away and redone by the next verifier. The `set-status` call is your single
+load-bearing output: run it as the **last action** you take, then run `kuru show <id>`
+and confirm the status actually changed before reporting back. If `set-status` is
+refused (e.g. gates not green/fresh), that refusal is the real signal — fix or reject,
+never narrate a pass you couldn't record.
 
 **Cardinal rule: never soften the contract to make it pass.** If you're
 reinterpreting an AC charitably, stop. If the contract itself is wrong, reject and

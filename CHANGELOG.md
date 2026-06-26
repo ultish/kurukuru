@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-26
+
+### Added
+- **`set-stack --target` now resolves the single-app→multi-app conversion safely.** Adding a
+  `--target` to a repo that still has a flat top-level `gates` used to leave both in `config.json`
+  — a config the engine ignores and `doctor` hard-rejects, with no guidance. It now **refuses**
+  and asks (via the charter command's `AskUserQuestion`) what to do with the existing config:
+  `--discard-flat-gates` (drop the init default) or `--migrate-flat-gates-to NAME` (keep it as its
+  own app/target, `dir "."`). No more silent dead config or manual hand-editing.
+
+### Changed
+- **`/kuru:loop-workflow` now drives one `build → verify → ship` pipeline per slice, keyed on
+  the gate target** (supersedes the 1.1.0 phase-barriered rounds). A target runs **at most one**
+  slice's pipeline at a time — **same target → serialized** (the no-worktrees lesson: a shared
+  tree means parallel builds clobber each other and a build-in-flight contaminates a same-tree
+  verify), **different targets → parallel** (disjoint subtrees). Pipelines start in dependency
+  order, so a dependent begins the instant its last dep ships — no "wait a whole round" tax. A
+  single-target repo runs fully sequentially by design; a polyglot/monorepo runs one pipeline per
+  app at once. Scoped runs (`SL-0001,SL-0002`) follow the same rule automatically — you no longer
+  have to assert the named slices are file-disjoint; same-target ones serialize for you. The
+  planning agent now also reads each slice's `target`. Reference script + `selftest.sh` updated to
+  the target-mutex scheduler (now also asserts same-target serialization, different-target
+  parallelism, and that a refused ship is attempted exactly once).
+
+### Fixed
+- **Loop-workflow no longer spins on an unshippable slice.** A ship the engine refuses (slice not
+  actually `verified`) — or any stage that doesn't advance the slice's status — now stops that
+  slice and reports it `stuck` after a single attempt, instead of re-running up to the rounds cap
+  (~10×). Progress is measured by real status transitions, not by "a stage acted."
+- **Verifier verdict must land in the ledger, not just in narration.** The verifier agent/skill,
+  `/kuru:verify`, and the loop-workflow verify prompt now require recording the verdict with
+  `set-status` and reporting the status read back from `kuru show <id>` — a "PASS" stated only in
+  prose or `verification.md` left slices stuck in `verifying`.
+- **Loop-workflow script must not touch `process`/`kuru.py` paths.** The reference script and
+  guardrails explicitly forbid `process.env`/`KURU_PY`/path-hunting in the (no-shell, no-`process`)
+  workflow runtime; all kuru access goes through the `/kuru:*` commands the agents run.
+- Corrected a stale `kuru.py` comment that claimed `ship` was "not a /kuru:* command" (it is —
+  `/kuru:ship`), and pointed `/kuru:next`'s verified/reviewed rows at `/kuru:ship`.
+
 ## [1.1.0] - 2026-06-24
 
 ### Added

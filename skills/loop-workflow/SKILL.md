@@ -1,14 +1,14 @@
 ---
 name: loop-workflow
-description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→ship in parallel using a Claude Code dynamic workflow. Explains how to author, present, and launch the workflow script, the phase-barriered rounds (all builds finish before any verify, so a shared-tree verify isn't contaminated), how slices route on the state machine (including retry/back-to-build edges), the deferred single commit, and the guardrails.
+description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→ship using a Claude Code dynamic workflow. Explains how to author, present, and launch the workflow script, the PER-SLICE pipelines keyed by gate target (same target serialized, different targets parallel — the no-worktrees lesson), how slices route on the state machine (including retry/back-to-build edges), the deferred single commit, and the guardrails.
 ---
 
 # Driving the board with a dynamic workflow
 
 `/kuru:loop-workflow` clears the board the same way `/kuru:loop` does — the mechanical
-`build → verify → ship` cycle — but it runs the **independent slices in parallel** and it
-does so as a **Claude Code dynamic workflow** rather than by orchestrating subagents inside
-this conversation.
+`build → verify → ship` cycle — but it drives each slice as its **own pipeline** and runs
+slices **on different gate targets in parallel** (same-target slices serialize), as a **Claude
+Code dynamic workflow** rather than by orchestrating subagents inside this conversation.
 
 ## Why a dynamic workflow (and not in-session orchestration)
 
@@ -17,9 +17,9 @@ verifier result piles into one context window; after a dozen slices the orchestr
 reasoning in a saturated context and quality decays. A dynamic workflow runs each `agent()`
 in its **own fresh context**, out of process — the script keeps only small structured results
 in JS variables, never the agents' transcripts. So a 30-slice board costs the orchestrator
-almost no context, and each build/verify starts from zero every time. This is why the workflow
-**replaces `runner.py`**: it gives the per-step context isolation `runner.py` reached for, but
-natively and resumably (within the session).
+almost no context, and each build/verify/ship starts from zero every time. This is why the
+workflow **replaces `runner.py`**: it gives the per-step context isolation `runner.py` reached
+for, but natively and resumably (within the session).
 
 ## The shape of the command
 
@@ -41,11 +41,19 @@ only holds the loop.
 1. **The script has no shell or filesystem access.** It only *coordinates* agents. Every
    `kuru.py` interaction happens **inside an `agent()`**, never in the script body — including
    the final commit, which the *launching session* does after the run, not the script.
+   - **The script must never reference `process`, `process.env`, `KURU_PY`, `CLAUDE_PLUGIN_ROOT`,
+     or any path to `kuru.py`.** There is no `process` global in the workflow runtime — touching
+     it throws `process is not available` and kills the run. The script does **not** locate
+     `kuru.py`; the **agents** run `/kuru:build|verify|ship|status`, and *those commands* resolve
+     the path themselves. If you find yourself trying to compute a kuru path in script body, stop
+     — that work belongs inside an `agent()` prompt as a `/kuru:*` command. (Same class of rule as
+     `Date.now()`/`Math.random()` being banned: the script body is a thin, side-effect-free
+     coordinator.)
 2. **Workflow agents drive kuru through the `/kuru:*` commands, not `kuru.py` directly.** So:
    - read the board → an agent runs **`/kuru:status`** and returns a structured snapshot;
    - build → an agent runs **`/kuru:build <id>`**;
    - verify → an agent runs **`/kuru:verify <id>`**;
-   - ship → an agent runs **`/kuru:ship <id> --no-commit`** (see next section).
+   - ship → an agent runs **`/kuru:ship <id> --no-commit`** (see "The deferred commit").
    This keeps the rule that **only `kuru.py` mutates the ledger** intact — the commands wrap it
    — without the script needing a path to `kuru.py`.
 3. **No agents use `isolation: 'worktree'`.** All agents run in the same project tree so they
@@ -54,95 +62,99 @@ only holds the loop.
    (defaults to shared tree). The launcher commits once afterward on the quiescent main tree.
 
    > If your runtime *can* run `kuru.py` from an agent, the planning agent can use
-   > `kuru next --all --json` for an authoritative machine snapshot instead of parsing
-   > `/kuru:status`. Prefer that when available; fall back to `/kuru:status` otherwise.
+   > `kuru next --all --json` for an authoritative machine snapshot (it includes each slice's
+   > `status`, `depends_on`, **and `target`**) instead of parsing `/kuru:status`. Prefer that
+   > when available; fall back to `/kuru:status` (whose `ls` table shows a target column)
+   > otherwise.
 
 ## The deferred commit (why ship can run immediately)
 
 `set-status done` normally auto-commits the whole working tree. On a shared tree with many
-slices building at once, a mid-run commit would sweep another slice's half-finished edits into
-the wrong commit — which, in the old design, forced ships to be drained sequentially while the
-tree was quiescent.
-
-So the workflow **decouples the `done` transition from the commit**: every ship runs
-`/kuru:ship <id> --no-commit`, which flips the slice to `done` in the ledger (lock-safe, no
-tree contention) but makes **no git commit**. Because ship no longer touches git, it has no
-quiescence requirement — the whole ship phase is just lock-safe ledger flips. Then, **after the
-whole run**, the launching session makes **one commit** for everything shipped, on a
-now-quiescent tree.
+slices moving at once, a mid-run commit would sweep another slice's in-flight edits into the
+wrong commit. So the workflow **decouples the `done` transition from the commit**: every ship
+runs `/kuru:ship <id> --no-commit`, which flips the slice to `done` in the ledger (lock-safe, no
+tree contention) but makes **no git commit**. Then, **after the whole run**, the launching
+session makes **one commit** for everything shipped, on a now-quiescent tree.
 
 The trade you are accepting (deliberately): **one commit per run, not per slice** — you lose
 per-slice revert granularity, and during the run `done`-in-the-ledger does not yet mean
 committed-in-git. The final commit must therefore run on **every** exit path (success,
 retry-cap, blocked), so the ledger and git reconverge no matter how the run ends.
 
-## The loop is phase-barriered rounds (NOT a per-slice pipeline)
+## The loop is per-slice pipelines, serialized per gate target
 
-The slices share **one working tree** (worktrees can't be used — they'd fork the in-tree
-`ledger.json`; see constraint 3 under "Two hard constraints" above). On a shared tree a
-per-slice pipeline is unsafe:
-it would let slice A reach `verify` while B and C are still in `build`, and **`verify` re-runs
-the gates and drives the running app against the whole tree** — so it observes B's and C's
-half-written code. That contaminates A's evidence *even when all three touch disjoint files*,
-because verify reads the whole tree, not "A's files". Phase isolation is the only thing that
-removes this; file-disjointness cannot.
+Each slice is driven through its **own** `build → verify → ship` pipeline — a fresh `agent()`
+per stage. The slices do **not** march through global phases. What decides parallelism is the
+**gate target** (the `config.json` target a slice builds under; `"default"` for a single-target
+repo):
 
-So the loop runs **one phase at a time, with many slices per phase**:
+- **Same target → serialized.** A target runs **at most one** slice's pipeline at a time. This
+  is the no-worktrees lesson made into a rule: the slices share **one working tree** (worktrees
+  can't be used — they'd fork the in-tree `ledger.json`), so two same-target slices running at
+  once would (a) clobber each other's edits during `build`, and (b) let one slice's in-flight
+  build contaminate the other's `verify`, which re-runs the gates and drives the running app
+  against that target's tree. Serializing the whole pipeline — not just barriering one phase —
+  removes both: while slice A is anywhere in build→verify→ship on target T, no other slice on T
+  starts.
+- **Different target → parallel.** Targets are disjoint subtrees with their own `dir` and gates,
+  so their pipelines can't contaminate each other. They run concurrently, bounded only by the
+  runtime's agent-concurrency cap.
+- **Dependency-ordered.** A slice's pipeline starts only once **all** its `depends_on` slices are
+  `done` — deps may live on any target. So a dependent begins the instant its last dependency
+  ships, not a phase later. (The DAG must be acyclic — a kuru invariant.)
 
-1. **Build** every slice whose status routes to build (deps already `done`) — one fresh
-   `agent()` each, **in parallel** — then **barrier**: wait for *all* builds to finish.
-2. **Verify** every slice now `built` — parallel agents — then **barrier**. Because every build
-   in this round has finished, no build is mutating the tree while these verifies run.
-3. **Ship** every slice now `verified` — `/kuru:ship <id> --no-commit` (lock-safe ledger flips).
+This is strictly better than the old phase-barriered rounds it replaces: serializing same-target
+slices end-to-end removes the contamination the barrier existed to prevent, **and** an
+independent-target slice can ship while another is still building — no "dependent waits a whole
+extra round" tax.
 
-**Only the build→verify ordering is safety-critical.** Ship touches no source and makes no
-commit — it's a lock-serialized ledger flip — so it can't contaminate or collide with anything
-and could run at *any* time, concurrent with builds or verifies. It sits in its own phase purely
-for code simplicity; because a ledger flip is instant, ordering it after verify (so the round's
-passing slices ship before the rejected ones rebuild) costs essentially nothing. So in a round
-where 2 of 3 slices are rejected, the 1 ships and the 2 re-enter the next round's build phase —
-the ship and the rebuilds don't need isolating from each other.
-
-Repeat the round until no slice can make progress. Each round's ships mark deps `done`, which
-unlocks dependents for the **next** round — so the dependency DAG is honored across rounds (a
-dependent waits one round past its last dep, the price of the barrier). A `rejected` slice loops
-back to the next round's build phase (its per-run reject tally caps it). The planning agent reads
-the board **once** up front for the slice set, each slice's status, and the dependency graph; the
-script tracks status from each agent's reported result thereafter.
-
-State routing comes straight from the state machine: `ready`/`in_progress`/`rejected` → build,
+Concretely the script runs a small **target-mutex scheduler**: repeatedly start every slice that
+is live, has its deps `done`, and whose target is currently free; then await the next pipeline to
+finish (which frees its target and may unlock dependents) and repeat, until nothing is running and
+nothing new can start. A `rejected` verdict loops the slice back through build **within its own
+pipeline** (capped by its per-run tally); `blocked`/`capped`/`stuck` stop that slice and surface
+it. State routing is the state machine: `ready`/`in_progress`/`rejected` → build,
 `built`/`verifying` → verify, `verified`/`reviewed` → ship.
 
-> **Throughput cost (accepted deliberately):** barriers idle the fast slices in a phase until the
-> slowest finishes, and a dependent always takes an extra round. This is the price of correct
-> evidence on a shared tree. The only way to recover full pipelining would be per-slice worktree
-> isolation — which this design rejects (it forks the ledger). On a **multi-target** repo the
-> within-phase parallelism is fully safe (disjoint subtrees); on a **single-project** repo the
-> remaining caveat is *within* a phase — concurrent verifies share the tree's runtime resources
-> (ports when driving the app, build-output dirs, caches), so a curated set should keep those
-> few enough not to collide.
+> **Throughput note:** parallelism scales with how many **distinct targets** are actionable —
+> a single-project (one-target) board runs fully sequentially by design, which is correct (you
+> can't safely parallelize one tree without worktrees). A polyglot/monorepo board runs one
+> pipeline per app concurrently. `/workflows` shows each slice's pipeline as its own progress
+> group, so a parallel run stays trackable.
 
 ## Guardrails (carried over — do not drop)
 
 - **Builder ≠ verifier.** Each build and each verify is a separate `agent()` with its own
   context — structurally guaranteed. Never have one agent both build and verify a slice.
+- **A phase agent reports the LEDGER status, not its own narration.** Every build/verify/ship
+  agent must read `kuru show <id>` after acting and return *that* status. The classic failure: a
+  verifier runs its integration scripts, they pass, it declares "verified" in prose — but never
+  runs `set-status`, so the ledger still says `verifying`. If the agent then reports `verified`
+  from its belief, the pipeline routes the slice to ship, the engine refuses (it isn't actually
+  `verified`), and the slice goes nowhere. The fix is the read-back: the verify prompt makes
+  recording the verdict the agent's load-bearing output and makes it report the status the ledger
+  shows.
+- **Route every slice by its *current* status through the `ACTION` table** — `build` for
+  `ready`/`in_progress`/`rejected`, `verify` for `built`/`verifying`, `ship` for
+  `verified`/`reviewed`. A stage that returns a status routing back to **itself** (e.g. a verify
+  that leaves the slice `verifying` — no verdict recorded — or a ship the engine refused) is **not
+  progress**: stop that slice and report it `stuck` rather than re-running the same stage. The
+  reference `drivePipeline` does exactly this (`ACTION[newStatus] === action` ⇒ stuck).
 - **Cap the send-back cycle, per run.** The script keeps a per-slice reject tally (starts at 0).
-  When a slice comes back `rejected`, increment; once it hits `maxRejectRetries` (default 2),
-  **stop driving that slice** (drop it from future rounds) and report it `capped`. Do not
-  auto-flip it to `blocked` (there is no `/kuru:*` verb for that and agents can't run `kuru.py`)
-  — leaving it `rejected` and reporting it is enough; a re-run gets a fresh budget.
-- **`blocked` stops a slice and its dependents, not the whole board.** If a build/verify leaves
-  a slice `blocked` (or it was blocked at start), it's dropped from future rounds, and any slice
-  that depends on it never enters a phase (its dep can't ship) and is reported `stuck`.
-  **Independent slices still finish** — this is not "routing around" a block, it's completing the
-  safe work — and every blocked/stuck/capped slice is surfaced at the end for a human. "Some
-  slices didn't ship" is a reported outcome, never silent.
+  When a verify returns `rejected`, increment; once it hits `maxRejectRetries` (default 2),
+  **stop driving that slice** (report it `capped`). Do not auto-flip it to `blocked` (there is no
+  `/kuru:*` verb for that and agents can't run `kuru.py`) — leaving it `rejected` and reporting it
+  is enough; a re-run gets a fresh budget.
+- **`blocked` stops a slice and its dependents, not the whole board.** If a build/verify leaves a
+  slice `blocked` (or it was blocked at start), it's dropped from scheduling, and any slice that
+  depends on it never starts (its dep can't ship) and is reported `stuck`. **Independent slices
+  still finish** — this is completing the safe work, not routing around a block — and every
+  blocked/stuck/capped slice is surfaced at the end for a human.
 - **Only `kuru.py` mutates state** — and only via the `/kuru:*` commands the agents run. Never
   have an agent hand-edit `ledger.json` / `gate-results.json`. A refused transition is a real
   signal.
-- **Dependencies must be acyclic** (a kuru invariant — you can't ship a cycle). The round loop
-  assumes this: a cycle would never make progress and would stop at the no-progress break with
-  the slices reported `stuck`. `doctor` and the slicing methodology keep the graph acyclic.
+- **Dependencies must be acyclic** (a kuru invariant). A cycle would never become runnable and
+  its slices are reported `stuck`. `doctor` and the slicing methodology keep the graph acyclic.
 
 ## Preconditions (the command checks these before authoring anything)
 
@@ -169,27 +181,27 @@ driving.
 ```javascript
 export const meta = {
   name: 'kuru-loop-workflow',
-  description: 'Drive ready Kurukuru slices through build -> verify -> ship in PHASE-BARRIERED rounds (all builds finish before any verify, so no in-flight build contaminates a verify on the shared tree); ship defers the commit (the launcher commits once after the run).',
+  description: 'Drive ready Kurukuru slices through PER-SLICE build -> verify -> ship pipelines, dependency-ordered. Slices on the SAME gate target serialize (one shared tree, no worktrees); slices on DIFFERENT targets run in parallel. Ship defers the commit (the launcher commits once after the run).',
   phases: [
-    { title: 'Plan',   detail: 'read the board + dependency graph via /kuru:status' },
-    { title: 'Build',  detail: 'all build-ready slices in parallel, then BARRIER' },
-    { title: 'Verify', detail: 'all built slices in parallel, then BARRIER' },
-    { title: 'Ship',   detail: 'flip verified slices to done (/kuru:ship --no-commit)' },
+    { title: 'Plan', detail: 'read the board: each slice status, depends_on, and gate target' },
+    { title: 'Pipelines', detail: 'one build->verify->ship pipeline per slice; same target serialized, different targets parallel' },
   ],
 }
 
 const MAX_RETRIES = (args && args.maxRejectRetries) || 2
-// Scope: args.slices is an array of ids — one id = single-slice (no parallelism), many =
-// a curated parallel set, absent/empty = whole board. Case-insensitive.
+// Scope: args.slices is an array of ids — absent/empty = whole board. The target-keyed
+// concurrency rule applies either way: named slices on different targets parallelize, named
+// slices on the same target serialize. Case-insensitive.
 const SCOPE = args && args.slices && args.slices.length
   ? new Set(args.slices.map((x) => String(x).toUpperCase()))
   : null
 
-// **CRITICAL**: Agents do NOT use isolation: 'worktree'. All agents run in the same tree
-// to read/write the shared ledger.json. Worktrees would fragment it into per-agent copies.
-// The launcher commits once after the run on the quiescent main tree.
+// **CRITICAL**: Agents do NOT use isolation: 'worktree'. All agents run in the same tree to
+// read/write the shared ledger.json. The launcher commits once after the run on the main tree.
 
-// What the planning agent returns after reading /kuru:status (read ONCE, up front).
+// What the planning agent returns after reading /kuru:status (read ONCE, up front). The `target`
+// is the concurrency key — a slice's config.json gate target, or "default" for a single-target
+// repo (kuru's /kuru:status `ls` table shows a target column; next --all --json carries it).
 const PLAN = {
   type: 'object', additionalProperties: false,
   required: ['slices', 'doneIds', 'blockedIds', 'draftIds'],
@@ -198,11 +210,12 @@ const PLAN = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'status', 'dependsOn'],
+        required: ['id', 'status', 'dependsOn', 'target'],
         properties: {
           id: { type: 'string' },
           status: { type: 'string' },                     // ready|in_progress|rejected|built|verifying|verified|reviewed
           dependsOn: { type: 'array', items: { type: 'string' } },
+          target: { type: 'string' },                     // gate target; "default" if single-target
         },
       },
     },
@@ -212,21 +225,23 @@ const PLAN = {
   },
 }
 
-// What each command-agent returns: the slice's status AFTER running its /kuru command.
+// What each command-agent returns: the slice's status AFTER running its /kuru command, read
+// BACK from `kuru show <id>` (never inferred from the agent's own narration).
 const RESULT = {
   type: 'object', additionalProperties: false,
   required: ['id', 'status'],
   properties: { id: { type: 'string' }, status: { type: 'string' }, note: { type: 'string' } },
 }
 
-// 1. Plan — one fresh agent reads the board + dependency graph, once.
-// NOTE: Do NOT add isolation: 'worktree' — this agent must read from the shared ledger.json
+// 1. Plan — one fresh agent reads the board + dependency graph + targets, once.
+// NOTE: Do NOT add isolation: 'worktree' — this agent must read from the shared ledger.json.
 const plan = await agent(
   `Run /kuru:status and read its output. Return every slice that is NOT done and NOT draft as
-{ id, status, dependsOn } — status is the slice's current state (ready / in_progress / rejected /
-built / verifying / verified / reviewed); dependsOn is its list of dependency slice ids. Also
-return doneIds (already-done slices), blockedIds, and draftIds. Report exactly what /kuru:status
-shows; do NOT start any work.`,
+{ id, status, dependsOn, target } — status is the slice's current state (ready / in_progress /
+rejected / built / verifying / verified / reviewed); dependsOn is its list of dependency slice
+ids; target is the config.json gate target it builds under (the target column in the ls table,
+or "default" if the repo is single-target). Also return doneIds (already-done slices),
+blockedIds, and draftIds. Report exactly what the board shows; do NOT start any work.`,
   { label: 'plan', phase: 'Plan', schema: PLAN }
 )
 
@@ -238,9 +253,9 @@ const ACTION = {
 const done = new Set(plan.doneIds)
 let slices = SCOPE ? plan.slices.filter((s) => SCOPE.has(s.id)) : plan.slices
 const byId = Object.fromEntries(slices.map((s) => [s.id, s]))
+const targetOf = (s) => (s.target || 'default')
 
-// Scoped mode: surface any requested id that isn't an actionable, non-done slice, with WHY —
-// so a typo'd / already-done / draft / blocked id is reported, never silently dropped.
+// Scoped mode: surface any requested id that isn't an actionable, non-done slice, with WHY.
 const requestedUnavailable = SCOPE
   ? [...SCOPE].filter((id) => !byId[id]).map((id) => ({
       id,
@@ -254,51 +269,67 @@ const requestedUnavailable = SCOPE
 // 2. Mutable per-slice run state (the script tracks status from each agent's reported result).
 const status = {}            // id -> current status
 const rejects = {}           // id -> per-run reject tally
-const blocked = new Set()    // ids that hit blocked this run (stop them + their dependents)
-const capped = new Set()     // ids that exhausted the reject budget
+const blocked = new Set()    // hit blocked this run
+const capped = new Set()     // exhausted the reject budget
+const stuck = new Set()      // a stage made no forward progress (e.g. verdict not recorded)
 for (const s of slices) { status[s.id] = s.status; rejects[s.id] = 0 }
 
-const isLive = (s) => !done.has(s.id) && !blocked.has(s.id) && !capped.has(s.id)
+const isLive = (s) => !done.has(s.id) && !blocked.has(s.id) && !capped.has(s.id) && !stuck.has(s.id)
 const depsDone = (s) => (s.dependsOn || []).every((d) => done.has(d))
-// A dependency that can never ship in this run kills its dependents: blocked, capped, or — for
+// A dependency that can never ship in this run kills its dependents: blocked/capped/stuck, or —
 // whole board (draft/blocked dep) or scoped (dep not named) — absent from `byId` and not done.
 const depDead = (s) => (s.dependsOn || []).some(
-  (d) => blocked.has(d) || capped.has(d) || (!done.has(d) && !byId[d]))
+  (d) => blocked.has(d) || capped.has(d) || stuck.has(d) || (!done.has(d) && !byId[d]))
 
-// Run ONE phase: every live slice whose status routes to `action`, in parallel, then BARRIER.
-// The barrier is the whole point — no build mutates the tree while the verify phase runs.
-const runPhase = async (action, phaseTitle, mkPrompt) => {
-  const batch = slices.filter(
-    (s) => isLive(s) && !depDead(s) && depsDone(s) && ACTION[status[s.id]] === action)
-  if (!batch.length) return 0
-  const results = await parallel(batch.map((s) => () =>
-    // No isolation: every agent shares the one tree + ledger.json (worktrees would fork it).
-    agent(mkPrompt(s.id), { label: `${action}:${s.id}`, phase: phaseTitle, schema: RESULT })
-      .then((r) => ({ id: s.id, status: r && r.status }))
-      .catch(() => ({ id: s.id, status: 'error' }))))
-  for (const r of results) {
-    if (!r || !r.status || r.status === 'error') { blocked.add(r.id); continue }
-    status[r.id] = r.status
-    if (r.status === 'blocked') blocked.add(r.id)
-    else if (r.status === 'rejected') { if (++rejects[r.id] >= MAX_RETRIES) capped.add(r.id) }
-    else if (r.status === 'done') done.add(r.id)
-  }
-  return batch.length
+const prompt = {
+  build: (id) => `Run \`/kuru:build ${id}\` and let it finish (it dispatches the builder and runs the gates). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
+  verify: (id) => `Run \`/kuru:verify ${id}\` and let it finish (a fresh, INDEPENDENT verifier re-runs the gates and checks the contract). The verdict is only real once recorded: the verifier MUST end by running \`kuru set-status ${id} verified|rejected --by verifier\` — a "PASS" only in prose or in verification.md is NOT a verdict and leaves the slice in \`verifying\`. After it returns, run \`kuru show ${id}\` and report the status the LEDGER actually shows (verified / rejected / verifying / blocked) — never a status inferred from narration.`,
+  ship: (id) => `Run \`/kuru:ship ${id} --no-commit\` — flip the slice to done WITHOUT committing (the launcher commits after the run). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
 }
 
-// 3. Phase-barriered rounds: ALL builds, barrier, ALL verifies, barrier, ALL ships. Each round's
-//    ships mark deps done -> unlock dependents next round. A rejected slice re-enters build next
-//    round (capped by its tally). Stop when a whole round makes no progress. The rounds cap is a
-//    backstop against a non-advancing status; normal runs hit the no-progress break far sooner.
-const MAX_ROUNDS = slices.length * (MAX_RETRIES + 2) + 5
-for (let round = 0; round < MAX_ROUNDS; round++) {
-  const built = await runPhase('build', 'Build',
-    (id) => `Run \`/kuru:build ${id}\` and let it finish (it dispatches the builder and runs the gates). Report this slice's resulting status.`)
-  const verified = await runPhase('verify', 'Verify',
-    (id) => `Run \`/kuru:verify ${id}\` and let it finish (a fresh, INDEPENDENT verifier re-runs the gates and checks the contract). Report this slice's resulting status.`)
-  const shipped = await runPhase('ship', 'Ship',
-    (id) => `Run \`/kuru:ship ${id} --no-commit\` — flip the slice to done WITHOUT committing (the launcher commits after the run). Report the slice's status.`)
-  if (!built && !verified && !shipped) break   // nothing could progress -> done
+// Drive ONE slice through its build -> verify -> ship pipeline, looping rejects up to the cap.
+// Every agent shares the one tree (NO worktrees). The scheduler holds this slice's target mutex
+// for the whole pipeline, so no same-target build is in flight to contaminate this verify.
+const drivePipeline = async (s) => {
+  while (true) {
+    const action = ACTION[status[s.id]]
+    if (!action) { stuck.add(s.id); return }                 // unexpected status -> stop, report
+    let r
+    try {
+      r = await agent(prompt[action](s.id), { label: `${action}:${s.id}`, phase: s.id, schema: RESULT })
+    } catch { blocked.add(s.id); return }
+    const ns = r && r.status
+    if (!ns || ns === 'error') { blocked.add(s.id); return }
+    status[s.id] = ns
+    if (ns === 'blocked') { blocked.add(s.id); return }
+    if (ns === 'done') { done.add(s.id); return }
+    if (ns === 'rejected') {                                 // verify sent it back
+      if (++rejects[s.id] >= MAX_RETRIES) { capped.add(s.id); return }
+      continue                                               // ACTION['rejected'] === 'build' -> rebuild
+    }
+    if (ACTION[ns] === action) { stuck.add(s.id); return }   // stage didn't advance (e.g. verdict not recorded) -> stop
+    // advanced to the next stage (ready->built, built->verified, ...) -> loop
+  }
+}
+
+// 3. Target-mutex scheduler: start every runnable slice whose target is free, await the next
+//    pipeline to finish (freeing its target + unlocking dependents), repeat until quiescent.
+const running = new Map()    // id -> pipeline promise
+const busy = new Set()       // targets currently occupied by a running pipeline
+const start = (s) => {
+  busy.add(targetOf(s))
+  running.set(s.id, drivePipeline(s).then(() => { busy.delete(targetOf(s)); running.delete(s.id) }))
+}
+while (true) {
+  const seen = new Set()     // don't start two pipelines on the same target in one tick
+  for (const s of slices) {
+    if (!isLive(s) || running.has(s.id) || !depsDone(s) || depDead(s)) continue
+    const t = targetOf(s)
+    if (busy.has(t) || seen.has(t)) continue
+    seen.add(t); start(s)
+  }
+  if (running.size === 0) break               // nothing running and nothing newly runnable -> done
+  await Promise.race([...running.values()])   // wait for the next pipeline, then re-evaluate
 }
 
 // 4. Classify outcomes for the launcher.
@@ -308,6 +339,7 @@ return {
   stuck:   slices.filter((s) => !done.has(s.id) && !capped.has(s.id)).map((s) => ({
     id: s.id,
     reason: blocked.has(s.id) ? 'blocked'
+          : stuck.has(s.id) ? `left at ${status[s.id]} (no progress / verdict not recorded)`
           : depDead(s) ? 'a dependency cannot ship in this run'
           : `left at ${status[s.id]}`,
   })),
@@ -328,17 +360,17 @@ the exact post-run commit + reporting.
 Parse up to two tokens from `$ARGUMENTS`, in any order, and pass them as the workflow's `args`:
 
 - a **slice scope** — one id or a **comma-separated list** (`SL-####`, case-insensitive, **no
-  spaces in the list**) → `args.slices` (an array); drive only the named slices, in parallel, on
-  the same phase-barriered rounds. A one-element list is the degenerate single-slice case (no parallelism,
-  same intent as `/kuru:loop-slice`). Omit the scope to drive the whole board.
+  spaces in the list**) → `args.slices` (an array); drive only the named slices. The same
+  target-keyed concurrency applies: named slices on **different** gate targets run in parallel,
+  named slices on the **same** target serialize. A one-element list is the degenerate
+  single-slice case. Omit the scope to drive the whole board.
 - a bare **integer** → `args.maxRejectRetries` (default 2): per-run rejection cap.
 
-In scoped mode **you** assert the set is safe to run together: on a single-project shared tree the
-named slices must touch disjoint files, because parallel builds share one working tree and
-overlapping edits clobber each other (and contaminate each verify, which runs the gates over the
-whole tree). A dependency of a named slice that isn't itself in the set must already be `done`, or
-that slice can't ship — the script reports it (`unmet dependency: …`) rather than silently pulling
-it in.
+In scoped mode you do **not** have to assert the named slices touch disjoint files — the script
+serializes same-target slices for you and only parallelizes across targets (which are disjoint
+subtrees by definition). The one thing you must ensure: a dependency of a named slice that isn't
+itself named must already be `done`, or that slice can't ship — the script reports it
+(`a dependency cannot ship in this run`) rather than silently pulling it in.
 
 Retries are **per run**: start every slice's tally at 0 each launch; never read the lifetime
 `rejections` from `show`. Re-launching resets the budget.

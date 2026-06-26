@@ -11,7 +11,8 @@ Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
   kuru init [--stack T] [--profile DIR|URL]  scaffold .kuru/ (--profile = a profile catalog)
-  kuru set-stack <tool> [--target N]  rewrite config gates from a preset (or seed one target)
+  kuru set-stack <tool> [--target N [--discard-flat-gates|--migrate-flat-gates-to NAME]]
+                                    rewrite config gates from a preset (or seed one target)
   kuru new-slice "<title>" [--epic E] [--target N]
   kuru set-target <id> <target>     assign a slice to a config.json gate target
   kuru ls [--status S]              list slices (table)
@@ -202,7 +203,8 @@ STATUS_ACTION = {
     "ready": "build",
     # Code review is opt-in (run /kuru:review by hand on a verified slice). The
     # default pipeline ships a verified — or already-reviewed — slice straight to
-    # `done`; `ship` is handled inline by the loop/runner, not a /kuru:* command.
+    # `done`. The ship transition is `set-status <id> done`; /kuru:loop runs it
+    # inline, while /kuru:ship (and /kuru:loop-workflow) wrap it as a /kuru:* verb.
     "verified": "ship",
     "reviewed": "ship",
     "draft": "slice",        # needs a human to slice/contract it
@@ -445,12 +447,48 @@ def cmd_set_stack(args):
             cfg = load_json(kd / "config.json")
         except Exception:
             cfg = {"project": project}
+
+        # Adding a target converts this repo to multi-app, where the engine ignores the
+        # flat top-level `gates` (and `doctor` rejects having both). If a single-app
+        # `gates` exists — e.g. left by `init`, possibly already tailored — we will NOT
+        # silently throw it away. The caller must say what happens to it:
+        #   --discard-flat-gates        drop it (it was just boilerplate)
+        #   --migrate-flat-gates-to N   keep it as its own app, target N (dir ".")
+        flat = cfg.get("gates")
+        migrate_to = getattr(args, "migrate_flat_gates_to", None)
+        discard = getattr(args, "discard_flat_gates", False)
+        migrated = None
+        if flat is not None:
+            if migrate_to and discard:
+                die("pass only one of --migrate-flat-gates-to / --discard-flat-gates.")
+            if not migrate_to and not discard:
+                die(f"config.json has a single-app top-level `gates`; adding `--target "
+                    f"{target}` makes this a multi-app repo, where that top-level `gates` "
+                    f"is ignored. Decide what happens to the existing config — re-run with "
+                    f"ONE of:\n"
+                    f"  • keep it as its own app:  set-stack {args.stack} --target {target} "
+                    f"--migrate-flat-gates-to <NAME>\n"
+                    f"  • discard it (just the init default):  set-stack {args.stack} "
+                    f"--target {target} --discard-flat-gates")
+            if migrate_to:
+                if migrate_to == target:
+                    die(f"--migrate-flat-gates-to {migrate_to} collides with the --target "
+                        f"{target} you're adding; name the existing app something else.")
+                cfg.setdefault("targets", {})[migrate_to] = {"dir": ".", "gates": flat}
+                migrated = migrate_to
+            cfg.pop("gates", None)   # obsolete now (migrated into a target or discarded)
+
         tmap = cfg.setdefault("targets", {})
         existing_dir = tmap.get(target, {}).get("dir", ".")
         tmap[target] = {"dir": existing_dir, "gates": preset.get("gates", {})}
         save_json(kd / "config.json", cfg)
         print(f"Set target '{target}' gates from the config.{args.stack}.json preset "
               f"(dir: {existing_dir}).")
+        if migrated:
+            print(f"Kept the previous single-app `gates` as target '{migrated}' (dir: '.') — "
+                  f"set its real `dir` and tailor it.")
+        elif flat is not None and discard:
+            print("Discarded the previous single-app top-level `gates`.")
         print(f"Now set this target's `dir` (where the app lives) and tailor its gate commands,")
         print("then run `kuru doctor`.")
         return
@@ -1035,6 +1073,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--target", default=None,
                    help="multi-app repo: seed/replace just this named target's gates "
                         "(preserving other targets) instead of rewriting the whole config")
+    s.add_argument("--migrate-flat-gates-to", default=None, metavar="NAME",
+                   help="when --target converts a single-app config to multi-app, keep the "
+                        "existing top-level `gates` as a target named NAME (dir '.')")
+    s.add_argument("--discard-flat-gates", action="store_true",
+                   help="when --target converts a single-app config to multi-app, drop the "
+                        "existing top-level `gates` (it was just the init default)")
     s.set_defaults(fn=cmd_set_stack)
 
     s = sub.add_parser("new-slice"); s.add_argument("title"); s.add_argument("--epic", default=None)

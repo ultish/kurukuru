@@ -57,24 +57,25 @@ runs charter/PRD/slicing for you. To ship a **single** named slice and stop ther
 use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
 <id>` (so it can't drift onto a ready sibling the board would rank first). To work
 **several independent slices in parallel**, use `/kuru:loop-workflow` — it authors a
-Claude Code **dynamic workflow** (a JS script the user approves and the workflow runtime
-runs in the background) that drives **phase-barriered rounds**: a planning agent reads
-`/kuru:status` once, then each round builds every build-ready slice in parallel, **waits for
-all builds (barrier)**, verifies every built slice in parallel, **barrier**, then ships every
-verified slice — each step a **fresh, isolated `agent()`**. The barrier is load-bearing:
-slices share one working tree, and `verify` re-runs the gates and drives the app against the
-*whole* tree, so a build still in flight would contaminate a concurrent verify *even on
-disjoint files*. Each round's ships unlock dependents for the next round. That per-step clean
-context is the point: it clears a large board without saturating the session, which is why it
-supersedes the headless `runner.py`. The workflow's agents touch kuru only through the
-`/kuru:*` commands (`/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py`
-directly, so the "only `kuru.py` mutates the ledger" rule holds; the engine serializes ledger
-writes with a file lock (`.kuru/.ledger.lock`). Ship defers its commit (`--no-commit`); the
-launching session makes **one commit after the run** instead of one per slice — trading
-per-slice revert granularity for parallel speed. Scope it to a curated set
-(`/kuru:loop-workflow SL-0001,SL-0002`) or omit for the whole board. See the `loop-workflow`
-skill for the design and the reference script. `max-reject-retries` is **per run** (a re-run
-resets every slice's tally).
+Claude Code **dynamic workflow** (a JS script the user approves and the workflow runtime runs
+in the background) that drives **one `build → verify → ship` pipeline per slice**, each stage a
+**fresh, isolated `agent()`**. Concurrency is keyed on the **gate target**: a target runs **at
+most one** slice's pipeline at a time (**same target → serialized** — the no-worktrees lesson:
+the slices share one working tree, so parallel builds clobber each other and a build-in-flight
+contaminates a same-tree verify, which re-runs the gates and drives the app), while **different
+targets run in parallel** (disjoint subtrees can't contaminate each other). A slice's pipeline
+starts only once its `depends_on` are all `done`, so the dependency DAG is honored and a
+dependent begins the instant its last dep ships. A single-target repo runs fully sequentially by
+design; a polyglot/monorepo runs one pipeline per app at once. That per-step clean context is the
+point: it clears a large board without saturating the session, which is why it supersedes the
+headless `runner.py`. The workflow's agents touch kuru only through the `/kuru:*` commands
+(`/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py` directly, so the
+"only `kuru.py` mutates the ledger" rule holds; the engine serializes ledger writes with a file
+lock (`.kuru/.ledger.lock`). Ship defers its commit (`--no-commit`); the launching session makes
+**one commit after the run** instead of one per slice — trading per-slice revert granularity for
+parallel speed. Scope it to a curated set (`/kuru:loop-workflow SL-0001,SL-0002`) or omit for the
+whole board. See the `loop-workflow` skill for the design and the reference script.
+`max-reject-retries` is **per run** (a re-run resets every slice's tally).
 
 ## The slice state machine (enforced by kuru.py)
 
@@ -179,7 +180,7 @@ repo, so resolve its path in this order:
 | Command | Effect |
 |---|---|
 | `init [--force] [--stack <tool>] [--profile DIR\|URL]` | Scaffold `.kuru/` (optionally from a build-tool preset, or a *catalog* of reusable env profiles — a local directory of `*.json`, a single file, or a GitHub/GitLab tree URL — stashed under `.kuru/profiles/` for the charter to match to apps). |
-| `set-stack <tool> [--target N]` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. With `--target`, seed/replace just that one gate target (monorepo), preserving the others. |
+| `set-stack <tool> [--target N] [--discard-flat-gates \| --migrate-flat-gates-to NAME]` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. With `--target`, seed/replace just that one gate target (monorepo), preserving the others. When `--target` first converts a single-app (flat `gates`) config to multi-app, it **refuses** until you say what happens to the flat gates: `--discard-flat-gates` (drop the init default) or `--migrate-flat-gates-to NAME` (keep it as target `NAME`, `dir "."`). |
 | `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..] [--target N]` | Create `SL-NNNN` + artifacts; status `draft`. `--target` binds it to a `config.json` gate target (monorepo). |
 | `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |

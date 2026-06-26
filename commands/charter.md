@@ -123,7 +123,13 @@ clobbering the others, then set each `dir` and tailor:
 python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack gradle --target api
 python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-stack pnpm   --target web
 ```
-which yields:
+**If the repo already has a single-app (flat `gates`) config** — e.g. a prior `init` or a
+`set-stack` without `--target` — the **first** `--target` call refuses rather than silently
+discard it, because going multi-app makes that flat `gates` dead config. Ask the user which they
+want (use `AskUserQuestion`), then re-run that call with one flag:
+`--discard-flat-gates` (it was just the init default) or `--migrate-flat-gates-to <NAME>` (keep
+the existing config as its own app, target `<NAME>`, `dir "."` — then set its real `dir`).
+This yields:
 ```json
 { "project": "mono",
   "targets": {

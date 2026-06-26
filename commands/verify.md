@@ -25,5 +25,15 @@ one that built the slice; that independence is the whole point. The verifier:
 - sets `verified --by verifier` (all pass + gates green) or `rejected --by
   verifier` with specifics.
 
-When it returns, summarize the verdict and evidence. If `rejected`, point to
-`/kuru:build <id>` to resume. If `verified`, point to `/kuru:review <id>`.
+When it returns, **confirm the verdict actually landed in the ledger — do not trust the
+agent's prose.** Re-read the machine state:
+`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" show <id>`.
+- status `verified` or `rejected` → good; summarize the verdict and evidence. If
+  `rejected`, point to `/kuru:build <id>` to resume; if `verified`, point to
+  `/kuru:review <id>` (or ship it).
+- status **still `verifying`** → the verifier finished its analysis but never recorded a
+  verdict (a "PASS" in its summary or in `verification.md` is **not** a verdict). Do NOT
+  report the slice as verified. Surface this loudly, read `verification.md` to see what it
+  concluded, and re-dispatch a fresh `kuru-verifier` to land the verdict (or, if the
+  evidence is incomplete, set it `rejected`). Never hand-edit the ledger to `verified` on
+  the agent's say-so — the `--by verifier` transition is the gate, not narration.

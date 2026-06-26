@@ -113,23 +113,25 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
   slices, one at a time, until the board is clear (code review is opt-in — run
   `/kuru:review` by hand). To ship just **one** named slice and stop there, use
   `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
-- **Dynamic workflow (parallel):** `/kuru:loop-workflow` is the same build → verify →
-  ship loop over **every actionable slice at once**, but it authors a Claude Code
-  **dynamic workflow** — a JavaScript script you approve, which the workflow runtime runs
-  in the background. It asks the engine `kuru next --all` for the full ready set, shows you
-  the plan and dependency edges first, then runs a **per-slice promise-DAG pipeline**: a
-  planning agent reads `/kuru:status` once, then each slice gets its own driver that runs
-  `build → verify → ship` as fast as it can — each step a **fresh, isolated `agent()`** —
-  awaiting its dependency drivers first (the dependency graph becomes a promise graph, so a
-  dependent starts the instant its deps ship). That per-step clean context is the point: it
-  clears a large board without saturating the session, which is why it **supersedes the
-  headless `runner.py`**. The workflow's agents touch kuru only through `/kuru:build`,
-  `/kuru:verify`, `/kuru:ship --no-commit` (never `kuru.py`); slices share one tree and one
-  ledger (the engine serializes ledger writes with a file lock), and the methodology assumes
-  parallel-ready slices touch different areas. Ship defers its commit, so the launching
-  session makes **one commit after the run** (trading per-slice revert granularity for
-  parallel speed). `/kuru:loop-workflow SL-0002 5` scopes it to one slice with 5 retries.
-  (Requires Claude Code workflows enabled.)
+- **Dynamic workflow (per-slice pipelines):** `/kuru:loop-workflow` runs the same build →
+  verify → ship cycle, but it authors a Claude Code **dynamic workflow** — a JavaScript script
+  you approve, which the workflow runtime runs in the background. It asks the engine
+  `kuru next --all` for the ready set, shows you the plan and dependency edges first, then runs
+  **one `build → verify → ship` pipeline per slice**, each stage a **fresh, isolated `agent()`**.
+  Concurrency is keyed on the **gate target**: a target runs **at most one** slice's pipeline at
+  a time (**same target → serialized** — the no-worktrees lesson: slices share one working tree,
+  so parallel builds clobber each other and a build-in-flight contaminates a same-tree verify),
+  while **different targets run in parallel** (disjoint subtrees). A slice's pipeline starts only
+  once its `depends_on` are all `done`, so a dependent begins the instant its last dep ships. A
+  single-target repo thus runs fully sequentially by design; a polyglot/monorepo runs one
+  pipeline per app at once. That per-step clean context is the point: it clears a large board
+  without saturating the session, which is why it **supersedes the headless `runner.py`**. The
+  workflow's agents touch kuru only through `/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`
+  (never `kuru.py`); the engine serializes ledger writes with a file lock. Ship defers its commit,
+  so the launching session makes **one commit after the run** (trading per-slice revert
+  granularity for parallel speed). `/kuru:loop-workflow SL-0001,SL-0002` scopes it to a curated
+  set — they run in parallel if on different targets, else serialized. (Requires Claude Code
+  workflows enabled.)
 - **Headless / unattended:** [`runner.py`](runner.py) — sequential — see below.
 
 Across all three, `max-reject-retries` is **per run**: re-running a `loop*` command

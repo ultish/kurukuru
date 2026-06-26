@@ -67,6 +67,15 @@ claims it out of `built` before you start). The engine only allows `verified` or
   listing exactly what failed and why, specific enough that the builder can fix it
   without re-reading the whole report.
 
+**Recording the verdict is the deliverable — a prose verdict is not a verdict.** You
+are not done until `kuru show <id>` reports `verified` or `rejected`. It is easy, after
+a long run of integration scripts that all pass, to declare "verified" in your summary
+and stop — but if you never ran `set-status`, the slice is still `verifying`: the gate
+hasn't moved and your whole run will be redone. Make the `set-status` call the last
+thing you do, then read `kuru show <id>` and confirm the status changed before you
+report. This is the harness's core rule applied to you: facts that gate progress live
+in the ledger, never in narration.
+
 ## The cardinal rule
 **Never soften the contract to make a slice pass.** If you find yourself
 reinterpreting an acceptance criterion charitably, stop — that's the failure mode.

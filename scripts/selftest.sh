@@ -309,13 +309,26 @@ $KURU set-status SL-0001 built --by builder >/dev/null
 expect_ok "flat config still gates (single default target)" $KURU gate SL-0001
 $KURU show SL-0001 --json | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['gate']['target']=='default' else 1)" \
   && ok "flat config resolves to the 'default' target" || fail "flat config target wrong"
-# set-stack --target seeds one target without clobbering the other
+# set-stack --target converting a single-app config must resolve the flat gates explicitly
+newrepo >/dev/null
+$KURU init >/dev/null   # flat top-level gates (node default)
+expect_fail "set-stack --target refuses to silently drop a single-app gates" "single-app top-level" \
+  $KURU set-stack node --target web
+expect_fail "set-stack --target rejects both resolve flags at once" "only one of" \
+  $KURU set-stack node --target web --discard-flat-gates --migrate-flat-gates-to old
+expect_fail "set-stack --migrate-flat-gates-to cannot collide with --target" "collides" \
+  $KURU set-stack node --target web --migrate-flat-gates-to web
+# discard: drop the init default, seed the new target; second target needs no flag (no flat left)
+$KURU set-stack node --target web --discard-flat-gates >/dev/null
+$KURU set-stack go --target api >/dev/null
+python3 -c "import json,sys; c=json.load(open('.kuru/config.json')); sys.exit(0 if set(c['targets'])=={'web','api'} and 'gates' not in c else 1)" \
+  && ok "set-stack --target (discard) keeps both targets, no orphan top-level gates" || fail "set-stack --target discard wrong"
+# migrate: keep the existing single-app gates as its own named target (dir '.')
 newrepo >/dev/null
 $KURU init >/dev/null
-$KURU set-stack node --target web >/dev/null
-$KURU set-stack go --target api >/dev/null
-python3 -c "import json,sys; t=json.load(open('.kuru/config.json'))['targets']; sys.exit(0 if set(t)=={'web','api'} else 1)" \
-  && ok "set-stack --target keeps both targets (no clobber)" || fail "set-stack --target clobbered a target"
+$KURU set-stack go --target api --migrate-flat-gates-to web >/dev/null
+python3 -c "import json,sys; c=json.load(open('.kuru/config.json')); t=c['targets']; sys.exit(0 if set(t)=={'web','api'} and 'gates' not in c and t['web']['dir']=='.' and t['web']['gates'] else 1)" \
+  && ok "set-stack --migrate-flat-gates-to keeps the old config as a target" || fail "set-stack migrate wrong"
 
 echo "== reviewed: a reviewed-but-unshipped slice is visible to next (action=ship) =="
 newrepo >/dev/null
@@ -456,13 +469,14 @@ sys.exit(0 if ready==6 and len(d["slices"])==6 else 1)
 PY
 then ok "6 concurrent set-status writes all landed (lock held)"; else fail "ledger race: a concurrent write was lost"; fi
 
-echo "== loop-workflow: reference round-loop logic (mock agents) =="
+echo "== loop-workflow: reference per-slice-pipeline logic (mock agents) =="
 # The /kuru:loop-workflow reference script (a JS template embedded in
 # skills/loop-workflow/SKILL.md) is run by the Claude Code Workflow runtime, not by
 # kuru.py — so the engine selftest can't reach it directly. Here we EXTRACT that script,
-# wrap it, and drive it against mock agent()/parallel() to assert the phase-barriered
-# round loop: clean flow, cross-round dependency ordering, retry-under-cap, cap exhaustion,
-# scoped-mode dead deps, blocked propagation, and pre-existing built/verified states.
+# wrap it, and drive it against mock agent()/parallel() to assert the per-slice pipeline
+# scheduler: clean flow, dependency ordering, retry-under-cap, cap exhaustion, scoped-mode
+# dead deps, blocked propagation, pre-existing built/verified states, and the target-keyed
+# concurrency rule (same target serialized, different targets parallel).
 # Skipped (not failed) where `node` is unavailable — the engine stays stdlib-Python-only.
 if command -v node >/dev/null 2>&1; then
   wf="$(mktemp -d)/wf.mjs"
@@ -492,14 +506,17 @@ function makeAgent(scn) {
       if (sc.rejectTimes && vcount[id] <= sc.rejectTimes) return { id, status: 'rejected' }
       return { id, status: 'verified' }
     }
-    if (cmd === 'ship') return { id, status: 'done' }
+    // shipRefused models the engine refusing a ship (slice not actually verified): the
+    // ledger status is unchanged. The pipeline must detect no-progress and stop after ONE
+    // attempt — never re-spin (this is the regression guard for the old 10x ship loop).
+    if (cmd === 'ship') return { id, status: sc.shipRefused ? 'verified' : 'done' }
   }
   return { agent, calls }
 }
 let fails = 0
 const eq = (name, got, want) => {
-  if (JSON.stringify(got) === JSON.stringify(want)) console.log('  ok: round-loop ' + name)
-  else { fails++; console.error('  FAIL: round-loop ' + name +
+  if (JSON.stringify(got) === JSON.stringify(want)) console.log('  ok: pipeline ' + name)
+  else { fails++; console.error('  FAIL: pipeline ' + name +
     '\n        got ' + JSON.stringify(got) + '\n        want ' + JSON.stringify(want)) }
 }
 const S = (a) => [...a].sort()
@@ -520,7 +537,7 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
       { id: 'SL-B', status: 'ready', dependsOn: ['SL-A'] }]) })
     const o = await run({}, agent, parallel)
     eq('B: chain both ship', S(o.shipped), ['SL-A','SL-B'])
-    eq('B: A ships before B builds (cross-round dep order)',
+    eq('B: A ships before B builds (dependency order)',
        calls.indexOf('ship:SL-A') < calls.indexOf('build:SL-B'), true)
   }
   { // C: one verify-reject under cap(2) -> retries and ships; build runs twice
@@ -565,6 +582,34 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
     eq('G: no spurious re-build of a built/verified slice',
        calls.some((c) => c === 'build:SL-A' || c === 'build:SL-B'), false)
   }
+  { // H: two slices on the SAME gate target serialize -> A's whole pipeline before B starts
+    const { agent, calls } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'ready', dependsOn: [], target: 'web' },
+      { id: 'SL-B', status: 'ready', dependsOn: [], target: 'web' }]) })
+    const o = await run({}, agent, parallel)
+    eq('H: same-target slices both ship', S(o.shipped), ['SL-A','SL-B'])
+    eq('H: same-target serialized (A ships before B even starts building)',
+       calls.indexOf('ship:SL-A') < calls.indexOf('build:SL-B'), true)
+  }
+  { // I: two slices on DIFFERENT targets run in parallel -> their pipelines interleave
+    const { agent, calls } = makeAgent({ plan: plan([
+      { id: 'SL-A', status: 'ready', dependsOn: [], target: 'web' },
+      { id: 'SL-B', status: 'ready', dependsOn: [], target: 'api' }]) })
+    const o = await run({}, agent, parallel)
+    eq('I: different-target slices both ship', S(o.shipped), ['SL-A','SL-B'])
+    eq('I: different-target parallel (B builds before A ships — interleaved)',
+       calls.indexOf('build:SL-B') < calls.indexOf('ship:SL-A'), true)
+  }
+  { // J: a ship the engine refuses (slice not actually verified) must NOT loop.
+    //    Regression guard for the old bug where ship re-ran ~10x on an unshippable slice.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'verified', dependsOn: [] }]),
+      scripts: { 'SL-A': { shipRefused: true } } })
+    const o = await run({}, agent, parallel)
+    eq('J: refused ship attempted exactly once (no loop)',
+       calls.filter((c) => c === 'ship:SL-A').length, 1)
+    eq('J: unshippable slice did not ship', o.shipped, [])
+    eq('J: unshippable slice reported stuck (not spun)', o.stuck.map((x) => x.id), ['SL-A'])
+  }
   process.exit(fails ? 1 : 0)
 })()
 '''
@@ -575,7 +620,7 @@ PY
     pass=$((pass + $(printf '%s\n' "$hout" | grep -c '^  ok:' || true)))
   else
     echo "$hout" >&2
-    fail "loop-workflow reference round-loop logic (see FAIL lines above)"
+    fail "loop-workflow reference per-slice-pipeline logic (see FAIL lines above)"
   fi
 else
   echo "  -- skipped: node not found (reference script is JS run by the Workflow runtime)"
