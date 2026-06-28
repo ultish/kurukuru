@@ -12,6 +12,18 @@
 >    session) has every service on disk. This makes the reuse problem fundamentally
 >    **cross-repository** and is the dominant design driver. See
 >    [Cross-service reuse](#cross-service-reuse-the-dominant-constraint).
+> 3. **Stack: GitLab self-managed** — GitLab CI pipelines are the populate-on-merge
+>    mechanism, and GitLab's own org-wide exact code search (Zoekt) is a strong candidate
+>    for the central tier (likely already owned).
+
+## Goal (north-star)
+
+**Give every LLM session — across different sessions and different team members — a shared,
+current understanding of the project: its structure, shared libraries, utilities, and
+published surfaces.** So the whole team (humans + agents) builds *toward something common*
+and stops rebuilding things that already exist. Reuse-prevention is the mechanism; **shared
+project understanding is the goal.** That understanding must live in artifacts that any
+session can load on demand — not in any one person's head or any one agent's context.
 
 ## Why this exists — the problem
 
@@ -57,7 +69,7 @@ and use different mechanisms.
 
 | Tier | Mechanism | Lifecycle | Scales to | Where it lives |
 |------|-----------|-----------|-----------|----------------|
-| **Committed manifest** | Generated `API_MAP.json` (symbol, import path, signature, one-line purpose, tags), read by the agent; sharded by domain | Proactive (read before write) | Small/medium repos (~hundreds of public symbols) | **git** — committed, refreshed in CI on merge. Git *is* the shared memory; no service. |
+| **Committed manifest** | Generated `API_MAP.json` (symbol, import path, signature, one-line purpose, tags), read by the agent; sharded by domain | Proactive (read before write) | Small/medium repos (~hundreds of public symbols) | **git** — committed, refreshed in CI on merge. Git *is* the shared memory; no service. *(Monorepo assumption — superseded under partial clones; see [Cross-service reuse](#cross-service-reuse-the-dominant-constraint).)* |
 | **Clone detector (dupehound)** | Normalized AST + winnowing fingerprints (MOSS algorithm); rename-resistant; flags structural duplicates | Reactive (catch in CI / verify, or edit-time via its MCP mode) | Any size | A binary; gate runs in the target repo. **Already wired in this repo.** |
 | **Semantic index** ← *this doc* | Embeddings over `purpose` + `signature`, vector search, exposed as an MCP tool | Proactive *and* intent-based | Huge / polyglot | **Self-hosted** infra (vector DB CI populates on merge) — embeddings don't live in git. The one place you need a service. *Per-dev/local needs none (on-device embeddings); only the team-shared form needs a server — air-gapped means self-hosted, never cloud.* |
 
@@ -109,23 +121,41 @@ public surface**, not every internal function:
 
 ### Shape
 
-- A **central, self-hosted registry** of that surface, populated by **each service's CI on
-  merge**, queryable by any dev/agent **via MCP regardless of local clones**. Air-gapped is
-  fine — it lives inside the network.
-- Start **lexical/structured** (each service's manifest aggregated into one queryable place
-  — cheap, no GPU, easy offline). Add **local-embedding semantic search** when cross-team
-  naming divergence bites. The semantic case is *stronger* here than in a monorepo: 20
-  people across teams name things more divergently than one team does — exactly the
-  "inconsistent naming" tail where embeddings beat keyword search.
+A three-**layer** hierarchy, **exact-first** (per [the agentic-grep analysis](#does-the-agentic-grep-argument-survive-here)):
+
+1. **Local agentic grep** — keep it, within whatever service is cloned. Cheapest, most precise.
+2. **Central exact search, agent-queried via MCP** — the cross-service reach. Two
+   complementary forms, both lexical (no GPU, air-gap fine, self-hosted):
+   - *Org-wide exact code search* over all services — **GitLab self-managed Zoekt** (likely
+     already in your stack) or self-hosted Sourcegraph. Brute, high-precision; you must know
+     the token.
+   - *Curated public-surface registry* — each service's **GitLab pipeline** extracts its
+     public surface (shared-lib exports + API contracts) on merge into one queryable place,
+     intent-taggable. Scoped to what's *meant* to be reused; this is the artifact that most
+     directly serves the [shared-understanding goal](#goal-north-star).
+3. **Local-embedding semantic search** — the tail, for cross-team **naming divergence**
+   (nomic-embed-code on a self-hosted vector DB). Add only when exact-search recall isn't
+   enough; the case is *stronger* here than in a monorepo, since 20 people across teams name
+   things more divergently than one team does.
+
+All of it self-hosted inside the network — air-gapped is fine — and exposed to agents via
+MCP so any session can query it regardless of local clones.
+
 - **Cross-service structural dedup** (dupehound's job, but org-wide) needs a **central scan
-  over a mirror of all services** — a CI job running dupehound against the aggregate, since
-  no local checkout sees the whole corpus.
+  over a mirror of all services** — a GitLab CI job running dupehound against the aggregate,
+  since no local checkout sees the whole corpus.
 
 ### Existing solutions for the cross-repo angle (possibly buy, not build)
 
 Org-wide search across repos you don't have locally is a solved category — evaluate these
 before building:
 
+- **GitLab self-managed exact code search (Zoekt)** ✅ air-gap deployable — you **likely
+  already own this in-stack**: org-wide ("global") code search across all projects since
+  GitLab 16.11, runs fully offline. The most direct "buy/already-have" answer for the
+  central *exact* tier, and it matches the exact-over-fuzzy preference. GitLab **Duo**
+  semantic/AI search does **not** work air-gapped (needs cloud), so lean on Zoekt-exact.
+  Your **GitLab pipelines** are the populate-on-merge mechanism for the curated registry.
 - **Sourcegraph (self-hosted / Enterprise)** ✅ air-gap capable — its whole value prop is
   searching **across all repositories centrally**, on-prem, independent of local clones.
   The most direct fit for "find reuse across uncloned services." Recent versions favor
@@ -247,8 +277,9 @@ Air-gap legend: ✅ runs fully local/offline · ⚠️ local-capable with config
 - **GitHub Copilot `@workspace`** ❌ — hosted.
 - **Sourcegraph Cody** ⚠️ — enterprise can self-host on-prem; note recent versions have
   **deprecated embeddings in favor of keyword/agentic retrieval** (see evidence below).
-- **GitLab Duo semantic code search** ⚠️ — self-managed has some on-prem options; confirm
-  it doesn't call out for embeddings.
+- **GitLab Duo semantic code search** ❌ air-gap — needs cloud connectivity; does **not**
+  run air-gapped. For GitLab, use **self-managed exact code search (Zoekt)** ✅ instead — see
+  [Cross-service reuse](#cross-service-reuse-the-dominant-constraint).
 - **Continue.dev** ✅ — open-source; `@codebase` indexing supports **local embedding models
   (Ollama/transformers) + a local vector store**. Air-gappable; good base for the
   team-shared tier if self-hosted.
@@ -305,11 +336,36 @@ which misses precisely the cross-service duplication you most care about. There,
 self-hosted index is the main event, not the tail. Don't build the *embedding* pipeline
 first — but you do need the *central lexical registry* first.
 
+### Does the agentic-grep argument survive here?
+
+The Claude Code argument is really **"agentic *exact* search beats prebuilt *fuzzy* RAG"** —
+not "never use a central index." Tested against partial-clone polyrepo, pillar by pillar:
+
+- **Precision** — still true, but its *scope collapses* to the local clones; you can't grep
+  a service that isn't on disk, so precision is **N/A for cross-service discovery**.
+- **Freshness** — *weakens*. The drift concern is about uncommitted local edits. A central
+  registry indexed **on merge** holds the published surface other services actually consume;
+  there's no edit-drift, and it's *fresher* than a teammate's stale clone of another service.
+- **Zero infra** — **breaks**: its premise is "the code is already local," which is false
+  across N partially-cloned services. No zero-infra option sees across services.
+- **Privacy** — about *cloud* embedding APIs; a **self-hosted air-gapped** index keeps
+  everything in-network, satisfying the same goal.
+
+So the *exact-over-fuzzy* preference survives; the *zero-infra / local-only* assumption is
+exactly what this environment violates. **Reconciliation:** keep local agentic grep within a
+cloned service, and give the agent an MCP tool that runs **exact search against a central
+index** (GitLab Zoekt / Sourcegraph) — still agentic, still exact, just no longer capped at
+local disk. Embeddings stay the tail. **The one place the tradeoff genuinely flips toward
+embeddings:** cross-team **naming divergence** — exact search finds `formatMoney` only if you
+search the right token; across 20 devs on separate services, divergent naming lowers
+exact-search recall and raises the embedding tier's value (more than in Claude Code's
+single-team monorepo context).
+
 ## Open questions — to explore next session
 
-1. **Embedding model & hosting.** Local model vs hosted API? Cost per symbol, latency,
-   and the privacy constraint of sending code/signatures to a third party. Does it stay
-   stdlib-friendly enough to live near the kuru engine, or is it strictly target-repo infra?
+1. **Local embedding model choice.** Air-gapped rules out hosted APIs entirely, so this is
+   purely a *local-weights* question: nomic-embed-code vs UniXcoder vs Qodo-Embed, run
+   per-dev on-device vs on an internal GPU box. Latency/throughput for CI re-embedding.
 2. **Vector store choice.** Lightweight/embeddable (sqlite-vec, LanceDB) vs a real
    service (pgvector, Qdrant). The "shared service" requirement vs the repo's
    "stdlib-only, no third-party deps" constraint — note this lives in the *target* repo's
@@ -330,9 +386,17 @@ first — but you do need the *central lexical registry* first.
 8. **Polyglot extraction.** Tree-sitter to extract the public surface across languages
    (TS compiler API, Python `ast`, `go doc`, ctags fallback). Same extractor feeds both
    the manifest and the embeddings.
-9. **Team/central memory model.** The manifest syncs via git; the semantic service is
-   the one shared piece of infra. Confirm the ADR/brain layer stays git-committed and
-   how the three layers (manifest, semantic index, brain) compose at query time.
+9. **Central registry hosting.** Under partial clones the manifest **cannot** sync via
+   per-repo git (you don't have the other repos) — it must be centrally aggregated. A
+   dedicated GitLab project / package registry the pipelines push to, vs a small search
+   service? Where does the ADR/brain layer live, and how do the layers (exact search,
+   curated registry, embeddings, brain) compose at query time?
+10. **Buy vs build the central tier.** Does self-hosted **GitLab Zoekt** global code search
+    alone cover enough cross-service discovery to defer the curated registry and embeddings
+    entirely? Pilot Zoekt first before building anything.
+11. **Contract-surface extraction.** How to harvest OpenAPI / protobuf / gRPC across services
+    into the registry — **Backstage** catalog vs a custom extractor — and what's the
+    authoritative contract source per service.
 
 ## One-line summary
 
@@ -361,3 +425,7 @@ a build-time/verify-time gate.
 - Securely indexing large codebases (Cursor) — https://cursor.com/blog/secure-codebase-indexing
 - Semantic & Agentic Search (Cursor Docs) — https://cursor.com/docs/agent/tools/search
 - GitLab Duo semantic code search — https://docs.gitlab.com/user/gitlab_duo/semantic_code_search/
+- GitLab exact code search (Zoekt) — https://docs.gitlab.com/user/search/exact_code_search/
+- GitLab Zoekt integration / air-gapped deployment — https://docs.gitlab.com/integration/zoekt/
+- Code search with Zoekt (GitLab Handbook) — https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/code_search_with_zoekt/
+- Backstage (software catalog + API registry) — https://backstage.io/
