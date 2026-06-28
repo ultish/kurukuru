@@ -402,6 +402,42 @@ expect_fail "stale gate run refused after rebuild" "stale" $KURU set-status SL-0
 $KURU gate SL-0001 >/dev/null 2>&1
 expect_ok "fresh gate run unlocks verified" $KURU set-status SL-0001 verified --by verifier
 
+echo "== reuse gate: init --reuse-check seeds a dupehound gate; --waive overrides a failure =="
+# default init seeds NO reuse gate (opt-in only)
+newrepo >/dev/null
+$KURU init >/dev/null
+python3 -c "import json,sys; g=json.load(open('.kuru/config.json')).get('gates',{}); sys.exit(0 if 'reuse' not in g else 1)" \
+  && ok "default init seeds no reuse gate" || fail "default init added a reuse gate"
+# --reuse-check warn -> advisory (required:false), never blocks
+newrepo >/dev/null
+$KURU init --reuse-check warn >/dev/null
+python3 -c "import json,sys; r=json.load(open('.kuru/config.json'))['gates'].get('reuse'); sys.exit(0 if r and r['cmd']=='dupehound check' and r['required'] is False else 1)" \
+  && ok "init --reuse-check warn seeds an advisory (required:false) dupehound gate" || fail "warn reuse gate wrong"
+# --reuse-check block -> required
+newrepo >/dev/null
+$KURU init --reuse-check block >/dev/null
+python3 -c "import json,sys; r=json.load(open('.kuru/config.json'))['gates'].get('reuse'); sys.exit(0 if r and r['required'] is True else 1)" \
+  && ok "init --reuse-check block seeds a required dupehound gate" || fail "block reuse gate wrong"
+# a failing REQUIRED gate blocks verify; --waive lets it through with a recorded reason
+newrepo >/dev/null
+$KURU init >/dev/null
+printf '{"project":"t","gates":{"reuse":{"cmd":"false","required":true,"timeout":60}}}\n' > .kuru/config.json
+$KURU new-slice "x" >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+expect_fail "failing required gate blocks verify" "FAILED" $KURU set-status SL-0001 verified --by verifier
+expect_ok "gate --waive on a failing required gate exits 0" $KURU gate SL-0001 --waive 'reuse=false positive: shared switch shape'
+python3 -c "import json,sys; r=json.load(open('.kuru/slices/SL-0001/gate-results.json')); g=r['gates'][0]; sys.exit(0 if r['passed'] and g['waived'] and 'false positive' in (g['waive_reason'] or '') else 1)" \
+  && ok "--waive records the reason and flips overall to pass" || fail "waiver not recorded / overall not passed"
+expect_ok "verified unlocks after a waived gate" $KURU set-status SL-0001 verified --by verifier
+# the waiver is per-run, not persisted: re-running gate without --waive fails verify again
+$KURU set-status SL-0001 rejected --by verifier >/dev/null
+$KURU set-status SL-0001 in_progress >/dev/null; sleep 1
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+expect_fail "re-running gate without --waive fails again (waiver not persisted)" "FAILED" $KURU set-status SL-0001 verified --by verifier
+
 echo "== SL-6: full draft->done lifecycle runs clean =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "ship it" >/dev/null

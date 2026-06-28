@@ -10,7 +10,7 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init [--stack T] [--profile DIR|URL]  scaffold .kuru/ (--profile = a profile catalog)
+  kuru init [--stack T] [--profile DIR|URL] [--reuse-check off|warn|block]  scaffold .kuru/
   kuru set-stack <tool> [--target N [--discard-flat-gates|--migrate-flat-gates-to NAME]]
                                     rewrite config gates from a preset (or seed one target)
   kuru new-slice "<title>" [--epic E] [--target N]
@@ -38,6 +38,7 @@ import datetime as _dt
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -371,6 +372,22 @@ def cmd_init(args):
     stack = (profiles[0][1].get("stack") if len(profiles) == 1 else None) or args.stack
     config_src = f"config.{stack}.json" if stack else "config.json"
     config_text = render(read_template(config_src), PROJECT=root.name)
+
+    # Optional dupehound duplicate-code gate. A repo-wide gate (the builder runs
+    # `kuru gate`, which reads config.json), so it's seeded here at init. `warn` is
+    # advisory (required:false -> WARN, never blocks); `block` is enforcing. A failing
+    # `block` run can still be moved past with `kuru gate --waive reuse=...`.
+    if args.reuse_check != "off":
+        if shutil.which("dupehound") is None:
+            print("  ! dupehound not found on PATH — the 'reuse' gate is seeded but will "
+                  "fail until you install it: https://github.com/Rafaelpta/dupehound")
+        cfg = json.loads(config_text)
+        cfg.setdefault("gates", {})["reuse"] = {
+            "cmd": "dupehound check",
+            "required": args.reuse_check == "block",
+            "timeout": 600,
+        }
+        config_text = json.dumps(cfg, indent=2) + "\n"
 
     seed = {
         "config.json": config_text,
@@ -928,6 +945,15 @@ def cmd_gate(args):
     if not cwd.is_dir():
         die(f"target '{tname}' dir '{target['dir']}' does not exist under {root}")
 
+    # One-off waivers: --waive NAME[=REASON] lets a FAILING required gate proceed for
+    # this run, recording the reason as a fact in gate-results.json (the verifier reads
+    # it and may still reject). Not persisted — a later `kuru gate` without --waive fails
+    # again, so a waiver can't rot into a silent permanent bypass.
+    waivers = {}
+    for w in args.waive:
+        wname, _, wreason = w.partition("=")
+        waivers[wname.strip()] = wreason.strip() or "(no reason given)"
+
     sdir = kuru_dir() / "slices" / s["id"]
     results = []
     overall = True
@@ -941,17 +967,24 @@ def cmd_gate(args):
         print(f"    live log: {logp}  ·  watch with:  tail -f {logp}")
         code, tail = _run_one_gate(cmd, timeout, cwd, logp)
         ok = code == 0
-        if required and not ok:
+        waived = (not ok) and required and name in waivers
+        if required and not ok and not waived:
             overall = False
-        status = "PASS" if ok else ("FAIL" if required else "WARN")
-        print(f"    {status} (exit {code})\n")
+        status = "WAIVED" if waived else ("PASS" if ok else ("FAIL" if required else "WARN"))
+        if waived:
+            print(f"    {status} (exit {code}) — {waivers[name]}\n")
+        else:
+            print(f"    {status} (exit {code})\n")
         results.append({
             "name": name, "cmd": cmd, "required": required,
             "exit_code": code, "passed": ok,
+            "waived": waived, "waive_reason": waivers.get(name) if waived else None,
             "log": str(logp), "output_tail": tail,
         })
 
-    summary = ", ".join(f"{r['name']}={'ok' if r['passed'] else 'x'}" for r in results)
+    summary = ", ".join(
+        f"{r['name']}={'ok' if r['passed'] else ('waived' if r['waived'] else 'x')}"
+        for r in results)
     record = {
         "slice": s["id"], "target": tname, "dir": target["dir"],
         "ran_at": now(), "passed": overall,
@@ -1066,6 +1099,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "GitHub contents / GitLab repository-tree listing (private repos: set "
                         "GITHUB_TOKEN / GITLAB_TOKEN). /kuru:charter matches each to an app. "
                         "Stashed under .kuru/profiles/.")
+    s.add_argument("--reuse-check", choices=("off", "warn", "block"), default="off",
+                   help="seed a dupehound duplicate-code gate into config.json: "
+                        "off=none (default) · warn=advisory (WARN, never blocks) · "
+                        "block=required (must be green or --waive'd to verify). "
+                        "Needs the `dupehound` binary on PATH at gate time.")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("set-stack"); s.add_argument("stack",
@@ -1113,7 +1151,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "used by /kuru:loop-workflow, which commits once after the parallel run)")
     s.set_defaults(fn=cmd_set_status)
 
-    s = sub.add_parser("gate"); s.add_argument("id"); s.set_defaults(fn=cmd_gate)
+    s = sub.add_parser("gate"); s.add_argument("id")
+    s.add_argument("--waive", action="append", default=[], metavar="NAME[=REASON]",
+                   help="treat a failing REQUIRED gate as non-blocking for THIS run, recording "
+                        "the reason in gate-results.json (e.g. --waive reuse=\"false positive\"). "
+                        "Per-run only — re-running without --waive fails again.")
+    s.set_defaults(fn=cmd_gate)
     s = sub.add_parser("check"); s.add_argument("id"); s.set_defaults(fn=cmd_check)
     s = sub.add_parser("doctor"); s.set_defaults(fn=cmd_doctor)
     return p

@@ -109,7 +109,12 @@ authoritative gate config gets set — the profile only informed it:
    correct: these are invariants, so it doubles as a regression guard. Do NOT wire it
    to read the profiles; a profile is guidance, this gate is the authoritative,
    executable form. Omit the gate if no convention is deterministically checkable.
-4. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
+4. **Preserve the reuse gate if `init --reuse-check` seeded one.** `set-stack`
+   rewrites `config.json` from a preset, dropping any `reuse` gate that `init` added.
+   If the seeded config had a `gates.reuse` (`dupehound check`) entry, re-add it after
+   seeding — `{"cmd": "dupehound check", "required": <block?true:false>, "timeout": 600}` —
+   in each target's `gates`. It's a repo-wide invariant, so it belongs in every target.
+5. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 If the build pipeline isn't a preset, write the gates by hand to match how this
 repo actually typechecks / lints / tests / builds.
 

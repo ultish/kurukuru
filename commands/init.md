@@ -1,6 +1,6 @@
 ---
 description: Scaffold a Kurukuru workspace (.kuru/) in the current repo.
-argument-hint: "[--stack node|pnpm|python|go|gradle|maven|cargo] [--profile DIR|URL] [--force]"
+argument-hint: "[--stack node|pnpm|python|go|gradle|maven|cargo] [--profile DIR|URL] [--reuse-check off|warn|block] [--force]"
 ---
 
 Use the `kuru-method` skill for context.
@@ -20,6 +20,10 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
      of `*.json` files, a single `.json` file, or an http(s) **URL** to a hosted
      catalog (GitHub/GitLab/Bitbucket). `/kuru:charter` matches each profile to an
      app. Stashed under `.kuru/profiles/`.
+   - `--reuse-check off|warn|block` — seed a `dupehound check` duplicate-code gate
+     into `config.json` (default `off`). `warn` is advisory (WARN, never blocks);
+     `block` is required (must be green or `kuru gate --waive`'d to verify). Needs the
+     `dupehound` binary on PATH at gate time. Only pass it if the user asks for it.
    - `--force` — re-scaffold files even if `.kuru/` already exists
 
 2. **Check if `.kuru/` already exists.** If it does and `--force` was not passed,
@@ -40,7 +44,7 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
 4. **Build the command** from the parsed flags and run it:
 
    ```
-   python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init [--stack STACK] [--profile DIR|URL] [--force]
+   python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init [--stack STACK] [--profile DIR|URL] [--reuse-check off|warn|block] [--force]
    ```
 
    Only include a flag if the user supplied it. `--profile` takes a single

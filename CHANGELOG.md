@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-28
+
+### Added
+- **Optional duplicate-code gate via [dupehound](https://github.com/Rafaelpta/dupehound).**
+  `kuru init --reuse-check off|warn|block` seeds a `dupehound check` gate into
+  `config.json` — `warn` is advisory (WARN, never blocks), `block` is required. It's a
+  repo-wide gate the builder runs (catches an agent reimplementing an existing function
+  under a new name). `init` warns if the `dupehound` binary isn't on PATH. Opt-in;
+  default `off`.
+- **`kuru gate --waive NAME[=REASON]`** — move a failing *required* gate forward for one
+  run (e.g. a dupehound false positive), recording the reason as a fact in
+  `gate-results.json`. Per-run only (not persisted), so it can't rot into a silent
+  permanent bypass; the verifier still reads the waiver and may reject.
+
 ## [1.2.0] - 2026-06-26
 
 ### Added
