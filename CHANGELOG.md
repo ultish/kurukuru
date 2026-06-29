@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-06-29
+
+### Changed
+- **Sharpened the `built_by` guidance** in `contract.yml` and the `slicing-work` skill:
+  `built_by` is *only* for re-verifying a behavior an earlier, already-`done` slice built
+  (a regression check) — never for this slice's own new behavior (that's "built-here",
+  left untagged), and a forward dependency is expressed with `--depends-on`, not
+  `built_by`. (The pre-build critic already flags both misuses; this makes them cheaper to
+  avoid while authoring.)
+
 ## [1.5.1] - 2026-06-29
 
 ### Changed

@@ -13,9 +13,12 @@ acceptance_criteria:
     statement: "REPLACE: a concrete, observable fact (e.g. POST /things returns 201 with the created id)."
     kind: automated            # automated | manual | observed
     evidence_required: "REPLACE: the exact proof the verifier must obtain, by a method OBTAINABLE IN THIS ENVIRONMENT (run `kuru env <id>` and honor its verification_access). e.g. 'test test_create_thing_201 passes'; or 'exec into the app pod and query in-cluster mongo for the row' — NOT an external connection when the dependency is in-cluster only."
-    # Optional: if this AC re-verifies something an EARLIER slice built (a regression
-    # check after this slice touches it), name that slice so the pre-build contract
-    # critic counts it as already-built, not built-by-nobody:  built_by: SL-0003
+    # Optional `built_by:` — use ONLY when this AC re-verifies a behavior an EARLIER,
+    # already-DONE slice built (a regression check after this slice touches its area), so
+    # the pre-build critic counts it as already-built, not built-by-nobody. Name that
+    # slice:  built_by: SL-0003.  Do NOT tag this slice's OWN new behavior with built_by —
+    # that's "built-here" (leave it off). A forward dependency on a not-yet-done slice is
+    # expressed with `--depends-on` at new-slice time, NEVER with built_by.
   # - id: AC-2
   #   statement: "..."
   #   kind: observed

@@ -58,12 +58,16 @@ Two failure modes turn a frozen contract into an endless build→verify→build 
 caught by the pre-build **contract critic** (`/kuru:check-contract`) — but cheaper to
 avoid while writing:
 
-- **Built by something.** Every AC must check a thing *this* slice builds (its in-scope)
-  **or** a thing an earlier `done` slice already built (a regression/extension check —
-  legitimate; name that slice in the AC's `built_by` so the critic doesn't flag it). An
-  AC that references a component **no slice builds** can never pass — the verifier finds
-  nothing to check. If an AC needs something unbuilt, either add it to this slice's
-  in-scope or it belongs in a different slice.
+- **Built by something.** Every AC must check a thing *this* slice builds (its in-scope —
+  leave it untagged, it's "built-here") **or** a thing an earlier, already-`done` slice
+  built (a regression/extension check after this slice touches its area — tag that AC
+  `built_by: SL-XXXX` so the critic counts it as already-built). An AC that references a
+  component **no slice builds** can never pass — the verifier finds nothing to check; if
+  an AC needs something unbuilt, add it to this slice's in-scope or move it to another
+  slice. **Don't misuse `built_by`:** it is *only* for an earlier done slice's work, never
+  for this slice's own new behavior, and a forward dependency on a not-yet-done slice is
+  `--depends-on`, not `built_by`. (The critic flags both mistakes, but they're cheaper to
+  avoid here.)
 - **Verifiable by an available method.** State evidence the verifier can actually obtain
   in the deploy topology (run `kuru env <id>`; honor its `verification_access`). If
   mongo/kafka live in-cluster and aren't reachable externally, an AC whose only evidence
