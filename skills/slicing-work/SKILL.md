@@ -116,18 +116,31 @@ only enforces outcomes. Instead:
 - Record cross-slice **dependencies** in `slice.md`. The builder of a later slice
   should be able to assume earlier ones are `done`.
 
-## Freeze the contract
-When a slice is ready to build, set `frozen: true` in `contract.yml` and
-`kuru set-status <id> ready`. From that moment the definition-of-done and
-acceptance criteria are **locked**. If you discover the scope was wrong:
-- re-`draft` the slice and re-cut it,
+## Check the contract, then freeze it
+Write each slice's `contract.yml` while the slice is still `draft` (leave
+`frozen: false`), then **run the contract critic before freezing** —
+`/kuru:check-contract --all`. It flags the two failure modes that otherwise survive to
+verify time: an AC **nothing builds**, and one **not verifiable in this environment**.
+Because the slice is still `draft`, fix a flagged contract **in place** (rewrite it and
+re-check) — no status churn, nothing is locked yet. Only once a slice is `CONTRACT OK`
+do you freeze it: set `frozen: true` and `kuru set-status <id> ready`.
+
+From that freeze moment the definition-of-done and acceptance criteria are **locked**.
+If you later discover the scope was wrong (or the loop's pre-build re-check flags a slice
+frozen in a prior session):
+- re-`draft` the slice and re-cut it — `ready -> draft` is a legal transition, so this is
+  a sanctioned, ledger-recorded re-cut (the contract critic's repair loop uses exactly
+  this path),
 - create a new slice for the extra scope, or
 - retire it: `kuru set-status <id> dropped --note "<why>"` — `next` and the loop
   ignore dropped slices, and `dropped -> draft` resurrects one for a re-write
   (same id, so other slices' dependencies on it stay valid).
 
-Never let a builder silently change the contract to match what it built — that's
-the exact drift this harness exists to prevent.
+Note: `frozen` is a **discipline marker** the planner/verifier honor — the engine does
+not enforce it. That is exactly why the rule matters: never let a builder **silently**
+change the contract to match what it built. A re-cut through `draft` is not silent (it's
+recorded in the ledger history); an in-place edit at `built` is — and that's the drift
+this harness exists to prevent.
 
 ## Assign a gate target (monorepo only)
 If `config.json` defines multiple gate targets — one per app/build flavor in the

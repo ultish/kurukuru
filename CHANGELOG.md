@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-06-29
+
+### Changed
+- **`/kuru:slice` now runs the contract critic *before* freezing.** Slices stay `draft`
+  while `/kuru:check-contract --all` runs, so a flagged contract is fixed **in place**
+  (no `ready → draft → ready` churn); a slice is frozen (`frozen: true` + `set-status
+  ready`) only once it is `CONTRACT OK`. The loops keep the `ready → draft → rewrite →
+  ready` repair path as a backstop for slices frozen in a prior session. Documented that
+  `frozen` is a discipline marker the engine does not enforce — a re-cut through `draft`
+  is a sanctioned, ledger-recorded transition, not the silent contract drift the harness
+  guards against. (`commands/slice.md`, `slicing-work` skill.)
+
 ## [1.5.0] - 2026-06-29
 
 ### Added

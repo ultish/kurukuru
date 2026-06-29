@@ -33,29 +33,33 @@ For each agreed slice:
 2. Fill its `slice.md` (goal, why-one-slice, inline context, in/out of scope,
    dependencies, numbered acceptance criteria).
 3. Fill its `contract.yml` (done_definition, acceptance_criteria with
-   evidence_required, out_of_scope) and set `frozen: true`.
-4. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> ready --note "contract frozen"`
+   evidence_required, out_of_scope) but **leave `frozen: false` and the slice in
+   `draft` for now** — you check the contract *before* freezing it (next), so a flaw is
+   fixed in place with no freeze/unfreeze churn.
 
-**Then check the contracts before slicing is done — this is the next step, not optional.**
-A frozen contract whose acceptance criteria reference something **no slice builds**, or
-demand evidence the **deploy environment can't produce**, can never pass — and you'd only
-discover it after a build is wasted. So gate slicing on a contract review, looping until
-clean:
+**Then check the contracts before freezing — this is the next step, not optional.** A
+contract whose acceptance criteria reference something **no slice builds**, or demand
+evidence the **deploy environment can't produce**, can never pass — and you'd only
+discover it after a build is wasted. Catch it now, while the slices are still `draft`:
 
-5. Run **`/kuru:check-contract --all`** — it dispatches the `kuru-contract-critic` over
-   every `draft`/`ready` slice you just cut. The critic reads each contract, the
-   cumulative done-state, and each slice's target environment (`kuru env <id>`), and
-   classifies every AC (built-here / built-by-an-earlier-done-slice — a legit regression
-   check / built-by-nobody / not-verifiable-in-this-env), writing
+4. Run **`/kuru:check-contract --all`** — it dispatches the `kuru-contract-critic` over
+   every `draft` slice you just cut. The critic reads each contract, the cumulative
+   done-state, and each slice's target environment (`kuru env <id>`), and classifies
+   every AC (built-here / built-by-an-earlier-done-slice — a legit regression check /
+   built-by-nobody / not-verifiable-in-this-env), writing
    `.kuru/slices/<id>/contract-review.md`.
-6. **For every `CONTRACT FLAGGED` slice, fix it and re-check** — this is the
-   slice → check → slice → check loop:
-   - `kuru set-status <id> draft`, rewrite `slice.md`/`contract.yml` from the report's
-     flags (you can dispatch **kuru-planner** to do this), `kuru set-status <id> ready`,
-   - re-run `/kuru:check-contract <id>`.
-   Repeat until **every** slice is `CONTRACT OK`. Do **not** advance to build with a
-   flagged contract still on the board.
+5. **For every `CONTRACT FLAGGED` slice, fix it in place and re-check** — this is the
+   slice → check → slice → check loop. The slice is still `draft`, so just rewrite
+   `slice.md`/`contract.yml` from the report's flags (dispatch **kuru-planner** if you
+   want it automated) and re-run `/kuru:check-contract <id>`. No status change needed —
+   nothing is frozen yet. Repeat until **every** slice is `CONTRACT OK`.
+6. **Only once a slice is `CONTRACT OK`, freeze it:** set `frozen: true` in its
+   `contract.yml`, then
+   `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> ready --note "contract frozen"`.
+   Do **not** freeze a flagged contract.
 
-Finish with `kuru ls` and tell the user the slices are contract-checked and ready —
-run `/kuru:build` (or `/kuru:loop`). (The loops also re-check before a slice's first
-build, as a backstop, but slicing is where a flawed contract should be caught.)
+Finish with `kuru ls` and tell the user the slices are contract-checked, frozen, and
+ready — run `/kuru:build` (or `/kuru:loop`). (The loops also re-check before a slice's
+first build as a backstop; a flag there — e.g. on a slice frozen in a prior session — is
+repaired via the sanctioned `ready → draft → rewrite → ready` cycle. But slicing,
+pre-freeze, is where a flawed contract should be caught.)
