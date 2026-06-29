@@ -17,6 +17,7 @@ Usage:
   kuru set-target <id> <target>     assign a slice to a config.json gate target
   kuru ls [--status S]              list slices (table)
   kuru show <id>                    show one slice (paths + state + history)
+  kuru env <id>                     print the resolved environment a slice's target runs in
   kuru next                         print the next actionable slice
   kuru set-status <id> <status> [--note "..."] [--by agent|human] [--no-commit]
                                     (-> done auto-commits the working tree; --no-commit skips it)
@@ -373,16 +374,19 @@ def cmd_init(args):
     config_src = f"config.{stack}.json" if stack else "config.json"
     config_text = render(read_template(config_src), PROJECT=root.name)
 
-    # Optional dupehound duplicate-code gate. A repo-wide gate (the builder runs
-    # `kuru gate`, which reads config.json), so it's seeded here at init. `warn` is
-    # advisory (required:false -> WARN, never blocks); `block` is enforcing. A failing
-    # `block` run can still be moved past with `kuru gate --waive reuse=...`.
+    # Optional dupehound duplicate-code gate. A genuinely repo-wide check (no single
+    # owning app), so it's seeded into top-level `repo_gates` rather than the single-app
+    # `gates`: it then runs at the repo root for every slice AND survives the charter's
+    # conversion to a multi-app `targets` config untouched (set-stack only rewrites
+    # `gates`). `warn` is advisory (required:false -> WARN, never blocks); `block` is
+    # enforcing. A failing `block` run can still be moved past with
+    # `kuru gate --waive reuse=...`.
     if args.reuse_check != "off":
         if shutil.which("dupehound") is None:
             print("  ! dupehound not found on PATH — the 'reuse' gate is seeded but will "
                   "fail until you install it: https://github.com/Rafaelpta/dupehound")
         cfg = json.loads(config_text)
-        cfg.setdefault("gates", {})["reuse"] = {
+        cfg.setdefault("repo_gates", {})["reuse"] = {
             "cmd": "dupehound check",
             "required": args.reuse_check == "block",
             "timeout": 600,
@@ -496,8 +500,14 @@ def cmd_set_stack(args):
             cfg.pop("gates", None)   # obsolete now (migrated into a target or discarded)
 
         tmap = cfg.setdefault("targets", {})
-        existing_dir = tmap.get(target, {}).get("dir", ".")
-        tmap[target] = {"dir": existing_dir, "gates": preset.get("gates", {})}
+        existing = tmap.get(target, {})
+        existing_dir = existing.get("dir", ".")
+        new_spec = {"dir": existing_dir, "gates": preset.get("gates", {})}
+        # Preserve a resolved-env `profile` pointer the charter may already have set on
+        # this target — re-seeding gates from a preset must not orphan its environment.
+        if existing.get("profile"):
+            new_spec["profile"] = existing["profile"]
+        tmap[target] = new_spec
         save_json(kd / "config.json", cfg)
         print(f"Set target '{target}' gates from the config.{args.stack}.json preset "
               f"(dir: {existing_dir}).")
@@ -619,6 +629,36 @@ def cmd_show(args):
     for f in artfiles:
         p = sdir / f
         print(f"  {'✓' if p.exists() else '·'} {p}")
+
+
+def cmd_env(args):
+    """Print the resolved environment a slice's target runs in — the deterministic feed
+    the builder and verifier read BEFORE choosing how to build tests / obtain evidence,
+    so they pick a method that works in THIS deploy topology instead of guessing. Reads
+    the slice's target -> its `profile` pointer -> .kuru/profiles/<name>.json."""
+    led = load_ledger()
+    s = get_slice(led, args.id)
+    if not s:
+        die(f"no slice {args.id}")
+    cfg = _config()
+    tname, _ = _slice_target(s, cfg)
+    env = _resolve_env(cfg, tname)
+    if getattr(args, "json", False):
+        print(json.dumps({"slice": s["id"], "target": tname, **env}, indent=2))
+        return
+    print(f"slice:   {s['id']}  (target: {tname})")
+    if not env:
+        print("environment: NONE RECORDED — no profile pinned for this target.")
+        print("  The builder/verifier will infer a method (low confidence). Pin one by")
+        print("  matching/generating a resolved profile in /kuru:charter, then point this")
+        print("  target at it (config.json target `profile` / top-level `profile`).")
+        return
+    print(f"profile: {env['profile']}  (.kuru/profiles/{env['profile']}.json)")
+    print("environment:")
+    print(json.dumps(env["environment"], indent=2) if env["environment"] else "  (empty)")
+    if env["conventions"]:
+        print("conventions:")
+        print(json.dumps(env["conventions"], indent=2))
 
 
 def cmd_next(args):
@@ -856,9 +896,52 @@ def _targets(cfg: dict) -> dict:
     at the repo ('.'), so existing configs keep working unchanged."""
     tg = cfg.get("targets")
     if tg:
-        return {name: {"dir": (spec.get("dir") or "."), "gates": spec.get("gates", {})}
+        return {name: {"dir": (spec.get("dir") or "."), "gates": spec.get("gates", {}),
+                       "profile": spec.get("profile")}
                 for name, spec in tg.items()}
-    return {"default": {"dir": ".", "gates": cfg.get("gates", {})}}
+    # Single-app: the implicit 'default' target may still name a top-level resolved
+    # profile (the per-target env of record), so build/verify can read the environment.
+    return {"default": {"dir": ".", "gates": cfg.get("gates", {}),
+                        "profile": cfg.get("profile")}}
+
+
+def load_profile(name: str) -> dict:
+    """Load a resolved profile from .kuru/profiles/<name>.json (the per-target
+    environment of record the charter wrote — seeded from a shareable catalog profile
+    or generated from charter Q&A). Returns {} if the file is absent/unreadable."""
+    p = kuru_dir() / "profiles" / f"{name}.json"
+    try:
+        return load_json(p)
+    except Exception:
+        return {}
+
+
+def _resolve_env(cfg: dict, target_name: str) -> dict:
+    """Resolve a target's environment for build/verify: follow its `profile` pointer to
+    the resolved profile and return {"profile","environment","conventions"}. Empty dict
+    when no profile is pinned (env genuinely unknown — agents degrade, doctor warns)."""
+    targets = _targets(cfg)
+    spec = targets.get(target_name) or {}
+    name = spec.get("profile")
+    if not name:
+        return {}
+    prof = load_profile(name)
+    return {
+        "profile": name,
+        "environment": prof.get("environment", {}),
+        "conventions": prof.get("conventions", {}),
+    }
+
+
+def _repo_gates(cfg: dict) -> dict:
+    """Repo-wide gates — a top-level `repo_gates` map of {name: {cmd,...}} that runs
+    for EVERY slice regardless of its target, always at the repo root. This is the home
+    for a genuinely repo-spanning check like the `dupehound` duplicate-code scan, which
+    has no single owning app. Unlike the single-app top-level `gates`, `repo_gates`
+    legally coexists with a `targets` map and is left untouched by `set-stack`, so a
+    reuse gate seeded at `init` survives the conversion to a multi-app repo."""
+    rg = cfg.get("repo_gates")
+    return rg if isinstance(rg, dict) else {}
 
 
 def _slice_target(s: dict, cfg: dict) -> tuple[str, dict]:
@@ -937,12 +1020,13 @@ def cmd_gate(args):
     cfg = _config()
     tname, target = _slice_target(s, cfg)
     gates = target["gates"]
-    if not gates:
-        die(f"no gates configured for target '{tname}' in .kuru/config.json")
+    repo_gates = _repo_gates(cfg)
+    if not gates and not repo_gates:
+        die(f"no gates configured for target '{tname}' (or repo-wide) in .kuru/config.json")
 
     root = find_root()
     cwd = (root / target["dir"]).resolve()
-    if not cwd.is_dir():
+    if gates and not cwd.is_dir():
         die(f"target '{tname}' dir '{target['dir']}' does not exist under {root}")
 
     # One-off waivers: --waive NAME[=REASON] lets a FAILING required gate proceed for
@@ -957,15 +1041,21 @@ def cmd_gate(args):
     sdir = kuru_dir() / "slices" / s["id"]
     results = []
     overall = True
-    print(f"Running gates for {s['id']} [target: {tname}] (cwd: {cwd}) ...\n")
-    for name, spec in gates.items():
+    # Run plan: repo-wide gates first (always at the repo root, for every slice), then
+    # the slice's target gates in the target's dir. Names are unique across the two sets
+    # (doctor enforces it), so waivers and per-gate logs stay unambiguous.
+    plan = [("repo", name, spec, root) for name, spec in repo_gates.items()]
+    plan += [(tname, name, spec, cwd) for name, spec in gates.items()]
+    print(f"Running gates for {s['id']} [target: {tname}] (cwd: {cwd}"
+          + (f", + repo-wide @ {root}" if repo_gates else "") + ") ...\n")
+    for scope, name, spec, gcwd in plan:
         cmd = spec["cmd"]
         required = spec.get("required", True)
         timeout = spec.get("timeout", 1800)
         logp = sdir / f"gate-{name}.log"
-        print(f"  ▶ {name}: {cmd}")
+        print(f"  ▶ {name}{' [repo-wide]' if scope == 'repo' else ''}: {cmd}")
         print(f"    live log: {logp}  ·  watch with:  tail -f {logp}")
-        code, tail = _run_one_gate(cmd, timeout, cwd, logp)
+        code, tail = _run_one_gate(cmd, timeout, gcwd, logp)
         ok = code == 0
         waived = (not ok) and required and name in waivers
         if required and not ok and not waived:
@@ -976,7 +1066,7 @@ def cmd_gate(args):
         else:
             print(f"    {status} (exit {code})\n")
         results.append({
-            "name": name, "cmd": cmd, "required": required,
+            "name": name, "scope": scope, "cmd": cmd, "required": required,
             "exit_code": code, "passed": ok,
             "waived": waived, "waive_reason": waivers.get(name) if waived else None,
             "log": str(logp), "output_tail": tail,
@@ -1042,9 +1132,42 @@ def cmd_doctor(args):
                 # build time, when the dir genuinely must exist.
                 warnings.append(f"target '{tname}' dir '{t['dir']}' does not exist yet "
                                 f"under {root} (a slice may create it)")
+            # Resolved-env pointer: a `profile` must resolve to a real file (error); a
+            # target with NO env recorded is a warning — the builder/verifier can't read
+            # the deploy topology and will infer a verification method (the wrong-kind-of-
+            # test failure mode). Warn, don't block: early/single-app charters legitimately
+            # may not know the env yet.
+            pname = t.get("profile")
+            if pname:
+                if not (kd / "profiles" / f"{pname}.json").exists():
+                    problems.append(f"target '{tname}' points at profile '{pname}' but "
+                                    f".kuru/profiles/{pname}.json is missing")
+                elif not load_profile(pname).get("environment"):
+                    warnings.append(f"target '{tname}' profile '{pname}' has no "
+                                    f"`environment` — build/verify can't read the topology")
+            else:
+                warnings.append(f"target '{tname}' has no `profile` — no recorded "
+                                f"environment for build/verify to read (`kuru env <id>` "
+                                f"will report none; set one in /kuru:charter)")
         if cfg.get("targets") and cfg.get("gates"):
             problems.append("config.json has both top-level `gates` and `targets`; the "
-                            "top-level `gates` is ignored — move it into a target or remove it")
+                            "top-level `gates` is ignored — move it into a target, into "
+                            "`repo_gates` (to run repo-wide), or remove it")
+        # Repo-wide gates: legal alongside `targets`, run at the repo root for every
+        # slice. Validate shape and ensure names don't collide with any target's gates
+        # (a shared name would make a waiver / per-gate log ambiguous at gate time).
+        rg = cfg.get("repo_gates")
+        if rg is not None and not isinstance(rg, dict):
+            problems.append("config.json `repo_gates` must be a map of gate-name -> {cmd,...}")
+        elif isinstance(rg, dict):
+            for gname, spec in rg.items():
+                if not isinstance(spec, dict) or "cmd" not in spec:
+                    problems.append(f"repo_gates['{gname}'] needs a 'cmd'")
+            for tname, t in targets.items():
+                clash = sorted(set(rg) & set(t["gates"]))
+                if clash:
+                    problems.append(f"gate name(s) {', '.join(clash)} appear in both "
+                                    f"`repo_gates` and target '{tname}' — rename one")
     except Exception as e:
         problems.append(f"config.json invalid: {e}")
     try:
@@ -1100,7 +1223,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "GITHUB_TOKEN / GITLAB_TOKEN). /kuru:charter matches each to an app. "
                         "Stashed under .kuru/profiles/.")
     s.add_argument("--reuse-check", choices=("off", "warn", "block"), default="off",
-                   help="seed a dupehound duplicate-code gate into config.json: "
+                   help="seed a dupehound duplicate-code gate into config.json `repo_gates` "
+                        "(runs repo-wide for every slice; survives multi-app conversion): "
                         "off=none (default) · warn=advisory (WARN, never blocks) · "
                         "block=required (must be green or --waive'd to verify). "
                         "Needs the `dupehound` binary on PATH at gate time.")
@@ -1133,6 +1257,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_ls)
     s = sub.add_parser("show"); s.add_argument("id")
     s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_show)
+    s = sub.add_parser("env"); s.add_argument("id")
+    s.add_argument("--json", action="store_true"); s.set_defaults(fn=cmd_env)
     s = sub.add_parser("next"); s.add_argument("--json", action="store_true")
     s.add_argument("--slice", default=None, metavar="ID",
                    help="action for this one slice only (for single-slice loops), "

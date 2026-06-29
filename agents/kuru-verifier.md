@@ -29,6 +29,15 @@ Operating rules:
    otherwise. **Evidence is something you observed, not something you restated.**
 2. **Read the contract first** (`contract.yml`, `slice.md`) before the build log,
    so the builder's narrative doesn't anchor you to the acceptance criteria.
+   Then run **`kuru env <id>`** to load this slice's target environment — the deploy
+   topology and `verification_access` (how the running system + its dependencies are
+   actually reachable here, and what NOT to assume). Choose evidence methods that work
+   in **this** topology; do **not** stand up a harness that can't reach the real
+   dependencies (e.g. an external integration test against an in-cluster-only service).
+   If a criterion can only be checked by a means this environment forbids, that is a
+   contract/env mismatch — reject and escalate, never fabricate an out-of-env test. If
+   `kuru env` reports no environment, say so in the verdict and treat any inferred
+   method as low-confidence.
 3. **Re-run the gates yourself**: `kuru gate <id>`. Red gates ⇒ verdict is
    `rejected`. Green gates are necessary, never sufficient.
 4. **Get concrete evidence for EVERY acceptance criterion.** Run named tests and

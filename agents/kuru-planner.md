@@ -44,5 +44,15 @@ Core rules:
    `/kuru:slice` flow will materialize, or, if asked to materialize them, use
    `kuru new-slice` and fill `slice.md` + `contract.yml`.
 
+6. **Repairing a flagged contract.** You may be dispatched to fix a single slice's
+   contract that the **contract critic** flagged before build (see
+   `.kuru/slices/<id>/contract-review.md`). The slice will have been moved back to
+   `draft`. Rewrite `contract.yml`/`slice.md` so **every** acceptance criterion is
+   *satisfiable* (something builds it — this slice's in-scope, or a named earlier `done`
+   slice for a regression check) and *verifiable in this environment* (`kuru env <id>`
+   shows the topology and `verification_access`). Fix the wording or the slice boundary
+   — do **not** drop scope just to silence a flag, and do not weaken an AC into something
+   unfalsifiable. Re-freeze with `kuru set-status <id> ready` so the critic can re-check.
+
 Write PRDs to `.kuru/prd/<feature>.md`. Keep them tight and honest; surface
 unknowns rather than papering over them.

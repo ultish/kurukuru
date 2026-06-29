@@ -52,6 +52,26 @@ later means re-`draft`ing slices — the drift this harness exists to prevent.
 | "The list is fast" | "GET /items?limit=50 returns in < 200ms p95 in the load test" |
 | "Errors are handled" | "When the upstream returns 500, the UI shows the error state and logs an `upstream_error` event" |
 
+### Each AC must be satisfiable AND verifiable *in this environment*
+
+Two failure modes turn a frozen contract into an endless build→verify→build loop, both
+caught by the pre-build **contract critic** (`/kuru:check-contract`) — but cheaper to
+avoid while writing:
+
+- **Built by something.** Every AC must check a thing *this* slice builds (its in-scope)
+  **or** a thing an earlier `done` slice already built (a regression/extension check —
+  legitimate; name that slice in the AC's `built_by` so the critic doesn't flag it). An
+  AC that references a component **no slice builds** can never pass — the verifier finds
+  nothing to check. If an AC needs something unbuilt, either add it to this slice's
+  in-scope or it belongs in a different slice.
+- **Verifiable by an available method.** State evidence the verifier can actually obtain
+  in the deploy topology (run `kuru env <id>`; honor its `verification_access`). If
+  mongo/kafka live in-cluster and aren't reachable externally, an AC whose only evidence
+  is "connect from the test runner and assert" is unverifiable here — phrase it as
+  evidence obtained the way the env allows (e.g. exec into the app pod). The slicer knows
+  the topology (the charter's resolved profile); bake the *method* into `evidence_required`
+  so the verifier doesn't improvise the wrong kind of test.
+
 ### Required tooling/conventions become checkable ACs, not "use skill X"
 
 If the charter's **Required tooling / conventions** names a skill, generator, or

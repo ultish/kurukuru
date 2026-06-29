@@ -60,11 +60,28 @@ Repeat until a stop condition fires:
 
    | next_action | action |
    |---|---|
-   | `build` (status `ready` / `in_progress` / `rejected`) | dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build <id>`) on this slice. If it's `rejected`, pass the verifier's rejection note so the builder fixes the named failures. |
+   | `build` (status `ready` / `in_progress` / `rejected`) | **first**, if this slice hasn't passed the pre-build contract check this run, run it (see **Pre-build contract check** below) and proceed only on `CONTRACT OK`. Then dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build <id>`) on this slice. If it's `rejected`, pass the verifier's rejection note so the builder fixes the named failures. (Skip the contract check on a `rejected` slice — its contract already passed; only the build failed.) |
    | `verify` (status `built` / `verifying`) | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify <id>`). |
    | `ship` (status `verified` / `reviewed`) | **ship it** — `set-status <id> done` (auto-commits the slice: code + `.kuru/` artifacts + ledger, as one commit), then go to **Termination**. Code review is opt-in and this loop does **not** run it. |
 
 4. After each transition, briefly note progress, then loop.
+
+### Pre-build contract check (advisory, before the first build)
+
+Before this slice is built for the first time **this run**, gate it through the
+**kuru-contract-critic** (as `/kuru:check-contract <id>`) — catching a contract no build
+could satisfy *before* a build→verify loop is wasted on it.
+
+- **CONTRACT OK** → mark it checked for this run, build.
+- **CONTRACT FLAGGED** → run the **contract-repair cycle**: `set-status <id> draft` →
+  dispatch a **fresh `kuru-planner`** with the critic's flags + `contract-review.md` to
+  rewrite `contract.yml`/`slice.md` → `set-status <id> ready` → re-run the critic.
+  Repeat until `CONTRACT OK`, **capped by `max-reject-retries`** (repair attempts count
+  toward the same per-run budget). If it can't converge, STOP — `set-status <id> blocked
+  --note "contract un-satisfiable after N repair attempts: <last flags>"`.
+
+The critic is **advisory** — it never changes status or edits the contract; the planner
+repairs, the engine records the `draft→ready` transitions.
 
 ### Hard guardrails (these are the point — do not skip)
 
@@ -78,8 +95,13 @@ Repeat until a stop condition fires:
   per run, so a re-run gets a fresh one. When the tally reaches `max-reject-retries`,
   STOP: `set-status <id> blocked --note "exceeded N build/verify retries this run: <last
   failure>"` and hand to a human. Do not spin forever.
-- **`blocked` means stop, not skip.** If a builder or verifier sets the slice `blocked`,
-  STOP and surface it — never route around it.
+- **Check the contract before building.** Don't dispatch a builder on a `ready` slice
+  that hasn't gone `CONTRACT OK` this run. A flagged contract is repaired by a fresh
+  **planner** (distinct from builder/verifier) via the `draft→ready` cycle above — never
+  by the critic, the builder, or hand-editing `contract.yml`. Repair attempts count
+  toward `max-reject-retries`.
+- **`blocked` means stop, not skip.** If a builder, verifier, or the contract-repair
+  cycle sets the slice `blocked`, STOP and surface it — never route around it.
 - **Never fabricate progress.** You only ever change status through `kuru.py`; you never
   hand-edit `ledger.json`/`gate-results.json`. If the engine's gate + role rules refuse a
   transition, that is a real signal, not an obstacle.

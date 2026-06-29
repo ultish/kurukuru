@@ -36,4 +36,26 @@ For each agreed slice:
    evidence_required, out_of_scope) and set `frozen: true`.
 4. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> ready --note "contract frozen"`
 
-Finish with `kuru ls` and tell the user to run `/kuru:build`.
+**Then check the contracts before slicing is done — this is the next step, not optional.**
+A frozen contract whose acceptance criteria reference something **no slice builds**, or
+demand evidence the **deploy environment can't produce**, can never pass — and you'd only
+discover it after a build is wasted. So gate slicing on a contract review, looping until
+clean:
+
+5. Run **`/kuru:check-contract --all`** — it dispatches the `kuru-contract-critic` over
+   every `draft`/`ready` slice you just cut. The critic reads each contract, the
+   cumulative done-state, and each slice's target environment (`kuru env <id>`), and
+   classifies every AC (built-here / built-by-an-earlier-done-slice — a legit regression
+   check / built-by-nobody / not-verifiable-in-this-env), writing
+   `.kuru/slices/<id>/contract-review.md`.
+6. **For every `CONTRACT FLAGGED` slice, fix it and re-check** — this is the
+   slice → check → slice → check loop:
+   - `kuru set-status <id> draft`, rewrite `slice.md`/`contract.yml` from the report's
+     flags (you can dispatch **kuru-planner** to do this), `kuru set-status <id> ready`,
+   - re-run `/kuru:check-contract <id>`.
+   Repeat until **every** slice is `CONTRACT OK`. Do **not** advance to build with a
+   flagged contract still on the board.
+
+Finish with `kuru ls` and tell the user the slices are contract-checked and ready —
+run `/kuru:build` (or `/kuru:loop`). (The loops also re-check before a slice's first
+build, as a backstop, but slicing is where a flawed contract should be caught.)

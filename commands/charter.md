@@ -109,12 +109,30 @@ authoritative gate config gets set — the profile only informed it:
    correct: these are invariants, so it doubles as a regression guard. Do NOT wire it
    to read the profiles; a profile is guidance, this gate is the authoritative,
    executable form. Omit the gate if no convention is deterministically checkable.
-4. **Preserve the reuse gate if `init --reuse-check` seeded one.** `set-stack`
-   rewrites `config.json` from a preset, dropping any `reuse` gate that `init` added.
-   If the seeded config had a `gates.reuse` (`dupehound check`) entry, re-add it after
-   seeding — `{"cmd": "dupehound check", "required": <block?true:false>, "timeout": 600}` —
-   in each target's `gates`. It's a repo-wide invariant, so it belongs in every target.
-5. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
+4. **The reuse gate is preserved automatically.** If `init --reuse-check` seeded a
+   `dupehound check` gate, it lives in top-level `repo_gates`, which `set-stack` never
+   rewrites — so it survives the conversion to a multi-app `targets` config untouched
+   and keeps running repo-wide for every slice. Nothing to re-add. (Don't copy it into
+   each target's `gates`; `repo_gates` already runs it once at the repo root.)
+5. **Pin the resolved environment profile, and point the target at it.** The
+   environment is not just charter prose — it must be machine-readable per target so
+   `kuru env <id>` can feed the builder/verifier the real topology (and the contract
+   critic can judge whether an AC is verifiable here). For each app/target:
+   - **A catalog profile matched** → it was stashed at `.kuru/profiles/<name>.json` by
+     `init`. Update that file in place with everything you confirmed/added (especially
+     `environment`, including a concrete **`verification_access`** — how a verifier
+     reaches the running system + its deps, and what NOT to assume). This stashed,
+     tweaked copy IS the **resolved profile**.
+   - **No catalog profile matched** (or none was provided) → **generate** a resolved
+     profile from the Q&A: write `.kuru/profiles/<name>.json` as
+     `{stack, config?, environment, conventions?}`, *proposing* a draft from repo
+     signals (`Dockerfile`, `helm/`, `k8s/` manifests, `docker-compose.yml`, CI files)
+     and **confirming with the user before saving** — never fabricate env facts.
+   - **Point the target at it:** add `"profile": "<name>"` to that target in
+     `config.json` (multi-app `targets`), or a **top-level** `"profile": "<name>"` for a
+     single-app repo. (`set-stack` preserves an existing `profile` pointer, so order
+     doesn't matter.) `kuru doctor` warns about any target with no profile/environment.
+6. Confirm with `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 If the build pipeline isn't a preset, write the gates by hand to match how this
 repo actually typechecks / lints / tests / builds.
 
@@ -150,9 +168,12 @@ target once more than one target exists.
 
 When `.kuru/profiles/` holds several profiles, each **matched** profile becomes one
 target: its `stack`/`config` seeds that target's gates, you ask the user for its
-`dir` (the profile can't know where the app lives in this repo), and its
-`environment`/`conventions` fold into the charter as that app's section. As with
-everything else in a profile, it's guidance, not gospel.
+`dir` (the profile can't know where the app lives in this repo), its
+`environment`/`conventions` fold into the charter as that app's section, and the
+target gets a `"profile": "<name>"` pointer at the resolved `.kuru/profiles/<name>.json`
+(step 5 above) so `kuru env <id>` can feed that app's topology to build/verify. An app
+with no matching catalog profile gets a **generated** resolved profile from the Q&A. As
+with everything else in a profile, it's guidance, not gospel.
 
 **Resolve open questions here — don't punt them downstream.** The charter is the
 cheapest place to catch ambiguity. Before you finish, review the **Open questions**

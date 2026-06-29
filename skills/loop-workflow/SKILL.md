@@ -116,6 +116,16 @@ pipeline** (capped by its per-run tally); `blocked`/`capped`/`stuck` stop that s
 it. State routing is the state machine: `ready`/`in_progress`/`rejected` → build,
 `built`/`verifying` → verify, `verified`/`reviewed` → ship.
 
+**Pre-build contract check (advisory).** Before a slice's **first build this run** (status
+`ready`/`in_progress`, not `rejected`), its pipeline runs the **contract critic**
+(`/kuru:check-contract <id>`) — catching a contract no build could satisfy (an AC nothing builds,
+or one unverifiable in this env) before a build→verify loop is wasted. `CONTRACT OK` → build;
+`CONTRACT FLAGGED` → a **repair** stage routes it back through the planner (`draft` → rewrite from
+the flags → `ready`) and re-checks, capped by `MAX_RETRIES` (a contract that won't converge is
+`capped`, exactly like an exhausted reject budget). The critic is advisory — it changes no status
+and the planner does the repair; this is all **inside the slice's own pipeline**, so it serializes
+under the same target mutex.
+
 > **Throughput note:** parallelism scales with how many **distinct targets** are actionable —
 > a single-project (one-target) board runs fully sequentially by design, which is correct (you
 > can't safely parallelize one tree without worktrees). A polyglot/monorepo board runs one
@@ -233,6 +243,14 @@ const RESULT = {
   properties: { id: { type: 'string' }, status: { type: 'string' }, note: { type: 'string' } },
 }
 
+// What the pre-build contract critic returns (advisory — it changes no status): 'ok' if the
+// frozen contract is satisfiable + verifiable in this env, else 'flagged' with the flags.
+const CHECK = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'verdict'],
+  properties: { id: { type: 'string' }, verdict: { type: 'string' }, note: { type: 'string' } }, // verdict: ok|flagged
+}
+
 // 1. Plan — one fresh agent reads the board + dependency graph + targets, once.
 // NOTE: Do NOT add isolation: 'worktree' — this agent must read from the shared ledger.json.
 const plan = await agent(
@@ -269,10 +287,12 @@ const requestedUnavailable = SCOPE
 // 2. Mutable per-slice run state (the script tracks status from each agent's reported result).
 const status = {}            // id -> current status
 const rejects = {}           // id -> per-run reject tally
+const repairs = {}           // id -> per-run contract-repair tally
+const checked = new Set()    // passed the pre-build contract check this run (CONTRACT OK)
 const blocked = new Set()    // hit blocked this run
-const capped = new Set()     // exhausted the reject budget
+const capped = new Set()     // exhausted the reject OR contract-repair budget
 const stuck = new Set()      // a stage made no forward progress (e.g. verdict not recorded)
-for (const s of slices) { status[s.id] = s.status; rejects[s.id] = 0 }
+for (const s of slices) { status[s.id] = s.status; rejects[s.id] = 0; repairs[s.id] = 0 }
 
 const isLive = (s) => !done.has(s.id) && !blocked.has(s.id) && !capped.has(s.id) && !stuck.has(s.id)
 const depsDone = (s) => (s.dependsOn || []).every((d) => done.has(d))
@@ -282,6 +302,8 @@ const depDead = (s) => (s.dependsOn || []).some(
   (d) => blocked.has(d) || capped.has(d) || stuck.has(d) || (!done.has(d) && !byId[d]))
 
 const prompt = {
+  check: (id) => `Run \`/kuru:check-contract ${id}\` — a fresh contract critic judges whether ${id}'s FROZEN contract is satisfiable (something builds each AC — this slice or an earlier done slice) and verifiable in this env. It is ADVISORY: it changes NO status and edits NO files but \`.kuru/slices/${id}/contract-review.md\`. After it returns, read that report and return { id, verdict: "ok" if it says CONTRACT OK else "flagged", note: the essence of the flags }.`,
+  repair: (id) => `${id}'s contract was FLAGGED as un-satisfiable/un-verifiable. Run \`kuru set-status ${id} draft\`, then dispatch a fresh kuru-planner to rewrite contract.yml/slice.md from the flags in \`.kuru/slices/${id}/contract-review.md\` so every acceptance criterion is satisfiable and verifiable in this environment (do NOT drop scope to dodge a flag — fix the wording or the slice boundary). Then run \`kuru set-status ${id} ready\`. Finally run \`kuru show ${id}\` and report the status the LEDGER shows.`,
   build: (id) => `Run \`/kuru:build ${id}\` and let it finish (it dispatches the builder and runs the gates). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
   verify: (id) => `Run \`/kuru:verify ${id}\` and let it finish (a fresh, INDEPENDENT verifier re-runs the gates and checks the contract). The verdict is only real once recorded: the verifier MUST end by running \`kuru set-status ${id} verified|rejected --by verifier\` — a "PASS" only in prose or in verification.md is NOT a verdict and leaves the slice in \`verifying\`. After it returns, run \`kuru show ${id}\` and report the status the LEDGER actually shows (verified / rejected / verifying / blocked) — never a status inferred from narration.`,
   ship: (id) => `Run \`/kuru:ship ${id} --no-commit\` — flip the slice to done WITHOUT committing (the launcher commits after the run). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
@@ -294,6 +316,24 @@ const drivePipeline = async (s) => {
   while (true) {
     const action = ACTION[status[s.id]]
     if (!action) { stuck.add(s.id); return }                 // unexpected status -> stop, report
+    // Pre-build contract check (advisory) — before the FIRST build of this slice this run.
+    // Skip on 'rejected' (its contract already passed; only the build failed). A FLAGGED
+    // contract is repaired by the planner (draft->ready) and re-checked, capped by MAX_RETRIES.
+    if (action === 'build' && (status[s.id] === 'ready' || status[s.id] === 'in_progress') && !checked.has(s.id)) {
+      while (true) {
+        let cr
+        try { cr = await agent(prompt.check(s.id), { label: `check:${s.id}`, phase: s.id, schema: CHECK }) }
+        catch { blocked.add(s.id); return }
+        if (!cr || cr.verdict === 'ok') { checked.add(s.id); break }   // safe to build
+        if (++repairs[s.id] > MAX_RETRIES) { capped.add(s.id); return } // contract won't converge -> stop
+        let rr
+        try { rr = await agent(prompt.repair(s.id), { label: `repair:${s.id}`, phase: s.id, schema: RESULT }) }
+        catch { blocked.add(s.id); return }
+        const rs = rr && rr.status
+        if (!rs || rs === 'blocked' || rs === 'error') { blocked.add(s.id); return }
+        status[s.id] = rs                                             // expect 'ready' -> re-check
+      }
+    }
     let r
     try {
       r = await agent(prompt[action](s.id), { label: `${action}:${s.id}`, phase: s.id, schema: RESULT })

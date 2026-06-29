@@ -46,6 +46,11 @@ A builder should not have to reverse-engineer intent from this section. -->
 
 ## Acceptance criteria
 <!-- Numbered, each a CHECKABLE FACT (not "works well"). These become the
-contract. If you can't state one concretely, the slice boundary is wrong. -->
+contract. If you can't state one concretely, the slice boundary is wrong. Each AC
+must be (a) built by THIS slice or a named earlier done slice (a regression check),
+and (b) verifiable by a method available in this environment (run `kuru env <id>` —
+honor its verification_access; don't demand evidence the deploy topology can't
+produce). The pre-build contract critic (/kuru:check-contract) flags ACs that fail
+either test before a build is wasted. -->
 1. **AC-1** — <observable, checkable fact>
 2. **AC-2** — <observable, checkable fact>

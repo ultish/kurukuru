@@ -31,29 +31,38 @@ repo root. The `kuru-method` skill has the full resolution order.
 1. **Read the contract, not the build log first.** Open `contract.yml` and
    `slice.md`. Know the acceptance criteria before you read what the builder says
    it did — so its narrative doesn't anchor you.
-2. **Re-run the gates yourself.** `kuru gate <id>`. Record the result. If red,
+2. **Load the environment before choosing how to verify.** Run `kuru env <id>` to
+   read the slice's target topology and `verification_access`. This decides the *kind*
+   of evidence that can actually pass here — get it wrong and you'll build a test that
+   can't run. If the env says a dependency is reachable only one way (e.g. mongo/kafka
+   exist in-cluster and aren't reachable externally), obtain evidence that way (exec
+   into the deployed pod) and do **not** stand up an external harness that can't reach
+   it. If an AC can only be checked by a means this env forbids, that's a contract/env
+   mismatch — reject and escalate; never fabricate an out-of-env test. No env recorded
+   → say so in the verdict and treat your inferred method as low-confidence.
+3. **Re-run the gates yourself.** `kuru gate <id>`. Record the result. If red,
    the verdict is already `rejected`.
-3. **Get concrete evidence for EVERY acceptance criterion.** Use the strongest
-   evidence available for its `kind`:
+4. **Get concrete evidence for EVERY acceptance criterion.** Use the strongest
+   evidence available for its `kind`, **by a method the environment (step 2) allows**:
    - **automated** — run the named test; capture the pass line and name. If the
      builder claims a test exists, confirm it actually exercises the behavior, not
      a tautology.
-   - **observed / manual** — **drive the running application**. `Bash` covers most
-     of it: `curl`/`http` the real endpoint, `kubectl`/`docker` against a deployed
-     service, `psql`/`redis-cli` to read persisted state, `logs` for audit entries.
-     Make the real request, read the real state, capture the actual output. For UI
-     states that truly need a screenshot (empty, loading, error, success), use a
-     browser-automation MCP **if your tools include one**; otherwise verify via the
-     HTTP/API layer and cite that. Inspect the database/state where the AC is about
-     persistence.
+   - **observed / manual** — **drive the running application** using the access the
+     env reports. `Bash` covers most of it: `curl`/`http` the reachable endpoint, exec
+     into / query the deployed service the way `verification_access` specifies,
+     `psql`/`redis-cli` to read persisted state, `logs` for audit entries. Make the
+     real request, read the real state, capture the actual output. For UI states that
+     truly need a screenshot (empty, loading, error, success), use a browser-automation
+     MCP **if your tools include one**; otherwise verify via the HTTP/API layer and
+     cite that. Inspect the database/state where the AC is about persistence.
    - For NFRs (authz, audit, error handling): actively try to break them — call as
      the wrong user, trigger the failure path — and confirm the specified
      behavior.
-4. **Hunt for out-of-contract bugs.** While exercising it, note granular defects
+5. **Hunt for out-of-contract bugs.** While exercising it, note granular defects
    beyond the ACs (e.g. "the fill tool's `fillRectangle` exists but never fires on
    mouseUp", "endpoint returns 422 on the documented payload"). These go in the
    report even when all ACs pass.
-5. **Write `verification.md`** from the template: the gate summary, a per-criterion
+6. **Write `verification.md`** from the template: the gate summary, a per-criterion
    PASS/FAIL table with the **observed evidence** for each, the out-of-contract
    bugs, and the verdict.
 

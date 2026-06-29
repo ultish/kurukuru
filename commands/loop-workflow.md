@@ -45,8 +45,12 @@ time — the no-worktrees lesson: parallel builds on one shared tree clobber eac
 build-in-flight contaminates a same-tree verify). **Different target → parallel** (disjoint
 subtrees can't contaminate each other). **Dependency-ordered**: a slice starts only once all its
 `depends_on` are `done`, so a dependent begins the instant its last dep ships — not a phase later.
-A `rejected` verdict loops the slice back through build **within its own pipeline** (capped by its
-per-run tally); the reject cap and the blocked-stops-a-slice-and-its-dependents rule are enforced
+Before a slice's **first build this run**, its pipeline runs an advisory **contract check**
+(`/kuru:check-contract <id>`): a flagged contract is repaired by the planner (`draft` → rewrite →
+`ready`) and re-checked before any build, so a build→verify loop is never wasted on a contract no
+build could satisfy. A `rejected` verdict loops the slice back through build **within its own
+pipeline** (capped by its per-run tally); the reject/repair caps and the
+blocked-stops-a-slice-and-its-dependents rule are enforced
 in the script. A single-target repo therefore runs fully sequentially (correct — you can't safely
 parallelize one tree without worktrees); a polyglot/monorepo runs one pipeline per app at once.
 

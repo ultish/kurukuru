@@ -99,6 +99,7 @@ Then, in Claude Code:
 /kuru:charter            # build shared understanding -> .kuru/charter.md
 /kuru:prd <feature>      # charter -> .kuru/prd/<feature>.md  (kuru-planner)
 /kuru:slice <feature>    # PRD -> vertical slices with frozen contracts
+/kuru:check-contract     # OPTIONAL pre-build: is a slice's contract satisfiable + verifiable here?
 /kuru:build              # kuru-builder implements the next ready slice -> built
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
 /kuru:review             # OPTIONAL code review of a verified slice -> reviewed -> done
@@ -232,6 +233,23 @@ that has no target once more than one exists.
 A single-app repo needs none of this: a flat top-level `gates` keeps working and is
 treated as one implicit `default` target at the repo root.
 
+**Repo-wide gates.** A check that spans the whole repo and has no single owning app —
+the `dupehound` duplicate-code scan is the motivating case — goes in a top-level
+`repo_gates` map instead. It legally coexists with `targets`, runs at the repo root for
+**every** slice regardless of its target, and is left untouched by `set-stack`. That's
+why `kuru init --reuse-check warn|block` seeds the reuse gate there: it survives the
+charter's conversion to a multi-app config automatically.
+
+```json
+{
+  "repo_gates": { "reuse": { "cmd": "dupehound check", "required": false, "timeout": 600 } },
+  "targets": {
+    "api": { "dir": "services/api", "gates": { "build": { "cmd": "./gradlew :api:build", "required": true, "timeout": 1800 } } },
+    "web": { "dir": "apps/web",     "gates": { "lint":  { "cmd": "pnpm lint",          "required": true, "timeout": 600  } } }
+  }
+}
+```
+
 ## Running headless (`runner.py`)
 
 `runner.py` is a standalone Python loop (stdlib only) that drives the plugin with
@@ -352,9 +370,9 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter prd slice build verify review ship status next bearings loop loop-slice loop-workflow
-├── agents/          kuru-planner  kuru-builder  kuru-verifier
-├── skills/          kuru-method writing-prds slicing-work building-a-slice verifying-a-slice loop-workflow
+├── commands/        init charter prd slice check-contract build verify review ship status next bearings loop loop-slice loop-workflow
+├── agents/          kuru-planner  kuru-builder  kuru-verifier  kuru-contract-critic
+├── skills/          kuru-method writing-prds slicing-work checking-a-contract building-a-slice verifying-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
 ├── scripts/selftest.sh  regression test for the engine's guarantees
 ├── scripts/smoke-headless.sh  proves /kuru:* resolves in a headless `claude -p` session
@@ -412,6 +430,7 @@ exposes:
   - /kuru:charter     — discovery session → charter.md
   - /kuru:prd         — charter → PRD via kuru-planner
   - /kuru:slice       — PRD → vertical slices with frozen contracts
+  - /kuru:check-contract — optional pre-build: kuru-contract-critic flags an unsatisfiable/unverifiable contract
   - /kuru:build       — kuru-builder implements the next ready slice
   - /kuru:verify      — kuru-verifier independently gatekeeps a built slice
   - /kuru:review      — optional code review before marking done

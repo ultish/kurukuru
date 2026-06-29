@@ -406,18 +406,32 @@ echo "== reuse gate: init --reuse-check seeds a dupehound gate; --waive override
 # default init seeds NO reuse gate (opt-in only)
 newrepo >/dev/null
 $KURU init >/dev/null
-python3 -c "import json,sys; g=json.load(open('.kuru/config.json')).get('gates',{}); sys.exit(0 if 'reuse' not in g else 1)" \
+python3 -c "import json,sys; c=json.load(open('.kuru/config.json')); sys.exit(0 if 'reuse' not in c.get('gates',{}) and 'reuse' not in c.get('repo_gates',{}) else 1)" \
   && ok "default init seeds no reuse gate" || fail "default init added a reuse gate"
-# --reuse-check warn -> advisory (required:false), never blocks
+# --reuse-check warn -> advisory (required:false) in repo_gates, never blocks
 newrepo >/dev/null
 $KURU init --reuse-check warn >/dev/null
-python3 -c "import json,sys; r=json.load(open('.kuru/config.json'))['gates'].get('reuse'); sys.exit(0 if r and r['cmd']=='dupehound check' and r['required'] is False else 1)" \
-  && ok "init --reuse-check warn seeds an advisory (required:false) dupehound gate" || fail "warn reuse gate wrong"
-# --reuse-check block -> required
+python3 -c "import json,sys; r=json.load(open('.kuru/config.json'))['repo_gates'].get('reuse'); sys.exit(0 if r and r['cmd']=='dupehound check' and r['required'] is False else 1)" \
+  && ok "init --reuse-check warn seeds an advisory (required:false) dupehound gate in repo_gates" || fail "warn reuse gate wrong"
+# --reuse-check block -> required, in repo_gates (NOT the single-app top-level gates)
 newrepo >/dev/null
 $KURU init --reuse-check block >/dev/null
-python3 -c "import json,sys; r=json.load(open('.kuru/config.json'))['gates'].get('reuse'); sys.exit(0 if r and r['required'] is True else 1)" \
-  && ok "init --reuse-check block seeds a required dupehound gate" || fail "block reuse gate wrong"
+python3 -c "import json,sys; c=json.load(open('.kuru/config.json')); r=c['repo_gates'].get('reuse'); sys.exit(0 if r and r['required'] is True and 'reuse' not in c.get('gates',{}) else 1)" \
+  && ok "init --reuse-check block seeds a required dupehound gate in repo_gates" || fail "block reuse gate wrong"
+# repo_gates is legal alongside targets, and runs at the repo root for the slice
+newrepo >/dev/null
+$KURU init >/dev/null
+printf '{"project":"mono","repo_gates":{"reuse":{"cmd":"true","required":true,"timeout":60}},"targets":{"api":{"dir":".","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+expect_ok "doctor accepts repo_gates alongside targets" $KURU doctor
+$KURU new-slice "x" --target api >/dev/null
+$KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
+$KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
+$KURU gate SL-0001 >/dev/null 2>&1
+python3 -c "import json,sys; g=json.load(open('.kuru/slices/SL-0001/gate-results.json'))['gates']; n={x['name']:x.get('scope') for x in g}; sys.exit(0 if n.get('reuse')=='repo' and n.get('build')=='api' else 1)" \
+  && ok "gate runs repo_gates (scope repo) + target gates (scope api)" || fail "repo_gates not merged into the gate run"
+# a repo_gate name colliding with a target gate name is rejected by doctor
+printf '{"project":"mono","repo_gates":{"build":{"cmd":"true"}},"targets":{"api":{"dir":".","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+expect_fail "doctor flags a repo_gate name colliding with a target gate" "rename one" $KURU doctor
 # a failing REQUIRED gate blocks verify; --waive lets it through with a recorded reason
 newrepo >/dev/null
 $KURU init >/dev/null
@@ -466,6 +480,36 @@ case "$out" in *"does not exist yet"*) ok "doctor warns about the missing dir" ;
 # but a real problem (a target with no gates) is still a hard failure
 printf '{"project":"t","targets":{"web":{"dir":".","gates":{}}}}\n' > .kuru/config.json
 expect_fail "doctor still hard-fails on no gates" "no gates configured" $KURU doctor
+
+echo "== env: resolved per-target environment feeds build/verify =="
+newrepo >/dev/null
+$KURU init >/dev/null
+mkdir -p .kuru/profiles
+printf '{"stack":"gradle","environment":{"deploy_env":"Kubernetes","verification_access":"exec into the pod; mongo in-cluster only"},"conventions":{"x":1}}\n' > .kuru/profiles/api-env.json
+printf '{"project":"t","targets":{"api":{"dir":".","profile":"api-env","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+$KURU new-slice "x" --target api >/dev/null
+expect_ok "doctor OK when a target points at a profile that has an environment" $KURU doctor
+$KURU env SL-0001 --json > /tmp/kuru-env-$$.json
+python3 -c "import json,sys; e=json.load(open('/tmp/kuru-env-$$.json')); sys.exit(0 if e['profile']=='api-env' and e['target']=='api' and 'in-cluster' in e['environment']['verification_access'] else 1)" \
+  && ok "env --json resolves slice -> target -> profile environment" || fail "env did not resolve the resolved profile"
+# a profile pointer to a MISSING file is a hard doctor failure
+printf '{"project":"t","targets":{"api":{"dir":".","profile":"ghost","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+expect_fail "doctor hard-fails on a profile pointer to a missing file" "is missing" $KURU doctor
+# a target with NO profile is a warning, not a failure
+printf '{"project":"t","targets":{"api":{"dir":".","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}}}\n' > .kuru/config.json
+out="$($KURU doctor 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok "doctor exits 0 with a profile-less target" || fail "doctor failed on a profile-less target (rc=$rc): $out"
+case "$out" in *"has no \`profile\`"*) ok "doctor warns about the profile-less target" ;; *) fail "no profile warning emitted: $out" ;; esac
+# single-app: a top-level `profile` pointer resolves too, and set-stack preserves a target's pointer
+printf '{"project":"t","profile":"api-env","gates":{"build":{"cmd":"true","required":true,"timeout":60}}}\n' > .kuru/config.json
+$KURU new-slice "y" >/dev/null
+$KURU env SL-0002 --json > /tmp/kuru-env2-$$.json
+python3 -c "import json,sys; e=json.load(open('/tmp/kuru-env2-$$.json')); sys.exit(0 if e['profile']=='api-env' else 1)" \
+  && ok "single-app top-level profile pointer resolves via env" || fail "top-level profile pointer not resolved"
+printf '{"project":"t","targets":{"api":{"dir":".","profile":"api-env","gates":{"build":{"cmd":"true"}}}}}\n' > .kuru/config.json
+$KURU set-stack gradle --target api >/dev/null 2>&1
+python3 -c "import json,sys; t=json.load(open('.kuru/config.json'))['targets']['api']; sys.exit(0 if t.get('profile')=='api-env' else 1)" \
+  && ok "set-stack --target preserves an existing profile pointer" || fail "set-stack dropped the profile pointer"
 
 echo "== next --all: the parallel actionable batch =="
 newrepo >/dev/null
@@ -527,9 +571,26 @@ harness = r'''
 const parallel = async (thunks) =>
   Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
 function makeAgent(scn) {
-  const calls = [], vcount = {}
+  const calls = [], vcount = {}, ccount = {}
   const agent = async (prompt) => {
     if (prompt.includes('/kuru:status')) return scn.plan
+    // Pre-build contract critic (advisory): returns a verdict, never a status. A slice with
+    // contractFlagged:n is flagged n times then OK (models n repairs converging);
+    // contractAlwaysFlagged stays flagged (models a contract that can't be made satisfiable).
+    if (prompt.includes('/kuru:check-contract')) {
+      const id = prompt.match(/SL-[\w-]+/)[0]
+      calls.push('check:' + id)
+      const sc = (scn.scripts && scn.scripts[id]) || {}
+      ccount[id] = (ccount[id] || 0) + 1
+      const flagged = sc.contractAlwaysFlagged || (sc.contractFlagged && ccount[id] <= sc.contractFlagged)
+      return { id, verdict: flagged ? 'flagged' : 'ok' }
+    }
+    // Contract repair: planner rewrites the flagged contract and re-freezes -> ready.
+    if (prompt.includes('rewrite contract.yml')) {
+      const id = prompt.match(/SL-[\w-]+/)[0]
+      calls.push('repair:' + id)
+      return { id, status: 'ready' }
+    }
     const m = prompt.match(/\/kuru:(build|verify|ship)\s+(SL-[\w-]+)/)
     const cmd = m[1], id = m[2]
     calls.push(cmd + ':' + id)
@@ -645,6 +706,29 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
        calls.filter((c) => c === 'ship:SL-A').length, 1)
     eq('J: unshippable slice did not ship', o.shipped, [])
     eq('J: unshippable slice reported stuck (not spun)', o.stuck.map((x) => x.id), ['SL-A'])
+  }
+  { // K: clean contract check fires BEFORE the first build, exactly once, then builds.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]) })
+    const o = await run({}, agent, parallel)
+    eq('K: clean contract ships', o.shipped, ['SL-A'])
+    eq('K: check ran once, before build', [calls.filter((c) => c === 'check:SL-A').length,
+       calls.indexOf('check:SL-A') < calls.indexOf('build:SL-A')], [1, true])
+  }
+  { // L: a flagged contract is repaired then builds — check, repair, check(ok), build, ship.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { contractFlagged: 1 } } })
+    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    eq('L: flagged-then-fixed contract ships', o.shipped, ['SL-A'])
+    eq('L: repaired once, never built before the contract was OK', [
+       calls.filter((c) => c === 'repair:SL-A').length,
+       calls.indexOf('build:SL-A') > calls.lastIndexOf('check:SL-A')], [1, true])
+  }
+  { // M: a contract that never converges is capped — never built, never shipped.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { contractAlwaysFlagged: true } } })
+    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    eq('M: un-satisfiable contract is capped', o.capped, ['SL-A'])
+    eq('M: capped contract never reached build', calls.some((c) => c === 'build:SL-A'), false)
   }
   process.exit(fails ? 1 : 0)
 })()

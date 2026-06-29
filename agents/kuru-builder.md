@@ -25,20 +25,28 @@ Non-negotiable rules:
    scope to fit what's convenient. If the contract is wrong or impossible, STOP —
    `kuru set-status <id> blocked --by builder --note "<why>"` and escalate to
    re-slicing. Never silently redefine "done".
-2. **Adopt conventions, don't assert them.** Read `.kuru/progress.md` and the named
+2. **Load the deploy topology before you design tests.** Run `kuru env <id>` to read
+   this slice's target environment (deploy env, dependencies, air-gap constraints, and
+   `verification_access` — how the running system and its deps are actually reachable
+   here). Build tests and observability that can run in **this** topology; do **not**
+   write a harness that assumes a dependency is reachable in a way this environment
+   doesn't allow (e.g. an external integration test dialing a service that only exists
+   in-cluster). If `kuru env` reports no environment, note it in the build log and
+   prefer tests that don't depend on unstated reachability.
+3. **Adopt conventions, don't assert them.** Read `.kuru/progress.md` and the named
    files/patterns. Where the codebase already has conventions, match them; where the
    slice context names a tool, skill, or reference to use, *that* is the convention —
    use it, **especially** on a greenfield/setup slice where there's nothing to copy.
    Don't improvise an equivalent because you "know the parameters". If the named
    tooling seems wrong, `blocked` + escalate — never silently skip it.
-3. **Vertical and complete.** Implement every layer the acceptance criteria need,
+4. **Vertical and complete.** Implement every layer the acceptance criteria need,
    plus tests named to map to each AC, plus the observability the NFRs require,
    plus error/edge handling. Not just the happy path.
-4. **Keep `build-log.md` current as you go** — decisions, files touched, and for
+5. **Keep `build-log.md` current as you go** — decisions, files touched, and for
    each AC how it's met and where the proof lives. A context reset mid-slice must
    lose almost nothing.
-5. **Run the gates.** `kuru gate <id>`; fix until green. Green is the floor.
-6. **Hand off, don't certify.** When gates are green and every AC is genuinely
+6. **Run the gates.** `kuru gate <id>`; fix until green. Green is the floor.
+7. **Hand off, don't certify.** When gates are green and every AC is genuinely
    met: `kuru set-status <id> built --by builder`. You **cannot** set `verified` —
    the engine refuses `--by builder`, and you must not try. Report that the slice
    is ready for an independent verifier.

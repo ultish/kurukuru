@@ -21,9 +21,11 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
      catalog (GitHub/GitLab/Bitbucket). `/kuru:charter` matches each profile to an
      app. Stashed under `.kuru/profiles/`.
    - `--reuse-check off|warn|block` — seed a `dupehound check` duplicate-code gate
-     into `config.json` (default `off`). `warn` is advisory (WARN, never blocks);
-     `block` is required (must be green or `kuru gate --waive`'d to verify). Needs the
-     `dupehound` binary on PATH at gate time. Only pass it if the user asks for it.
+     into `config.json` top-level `repo_gates` (default `off`), so it runs repo-wide for
+     every slice and survives the charter's conversion to a multi-app config. `warn` is
+     advisory (WARN, never blocks); `block` is required (must be green or `kuru gate
+     --waive`'d to verify). Needs the `dupehound` binary on PATH at gate time. Only pass
+     it if the user asks for it.
    - `--force` — re-scaffold files even if `.kuru/` already exists
 
 2. **Check if `.kuru/` already exists.** If it does and `--force` was not passed,

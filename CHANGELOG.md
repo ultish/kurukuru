@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-29
+
+### Added
+- **Resolved environment profiles, per gate target.** A target in `config.json` may now
+  carry a `profile` pointer (single-app: a top-level `profile`) that resolves to
+  `.kuru/profiles/<name>.json` — the **resolved** environment of record (deploy topology,
+  air-gap endpoints, a new `verification_access` field, conventions). `/kuru:charter`
+  writes it: it matches a shareable catalog profile to each app (or **generates** one from
+  the discovery Q&A when none matches) and points the target at it. This makes "which
+  environment is this slice's target?" machine-readable instead of charter prose.
+- **`kuru env <id>`** — prints the resolved environment a slice's target runs in
+  (`slice → target → profile`). The deterministic feed the builder and verifier now read
+  **before** choosing how to build tests / obtain evidence, so neither stands up a harness
+  that can't run in the real topology (e.g. an external integration test against an
+  in-cluster-only dependency). The builder and verifier agents/skills call it up front.
+- **Pre-build contract critic — `/kuru:check-contract` + `kuru-contract-critic` agent +
+  `checking-a-contract` skill.** An advisory step (run after slicing / before the first
+  build) that judges whether a frozen contract is **satisfiable** (every acceptance
+  criterion is built by this slice or a named earlier `done` slice — regression checks are
+  legit) and **verifiable in the target environment**, classifying each AC and flagging
+  the two failure modes that cause endless build→verify→build loops: an AC nothing builds,
+  and one unverifiable in this topology. It writes `contract-review.md` and returns a
+  verdict; it changes no status and edits no contract.
+- **Contract-repair cycle in the loops.** `/kuru:slice` now ends by gating on
+  `/kuru:check-contract --all` (slice → check → re-slice → check, until clean).
+  `/kuru:loop`, `/kuru:loop-slice`, and `/kuru:loop-workflow` run the critic before a
+  slice's first build as a backstop: a flagged contract routes back through the
+  **kuru-planner** (`draft` → rewrite from the flags → `ready`) and is re-checked, capped
+  by `max-reject-retries` (a contract that won't converge is reported `capped`).
+
+### Changed
+- `kuru doctor` validates the `profile` pointer: a pointer to a missing file is a hard
+  error; a target with no `profile`/`environment` is a warning (build/verify can't read
+  the topology). `set-stack --target` preserves an existing `profile` pointer when
+  re-seeding a target's gates.
+- The charter, slicing, contract, and slice templates now ask for environment-obtainable
+  evidence (and a `built_by` marker for regression ACs); the `kuru-method` pipeline shows
+  the advisory `check-contract` step (with its re-slice loop-back).
+
+## [1.4.0] - 2026-06-29
+
+### Added
+- **Repo-wide gates via a top-level `repo_gates` map.** A check that spans the whole
+  repo and has no single owning app now has a home that legally coexists with a
+  multi-app `targets` config. `repo_gates` run at the repo root for **every** slice, on
+  top of that slice's target gates, and `set-stack` never rewrites them. `kuru doctor`
+  accepts `repo_gates` alongside `targets` and flags a `repo_gates` name that collides
+  with a target's gate name.
+
+### Changed
+- **`kuru init --reuse-check warn|block` now seeds the `dupehound` gate into
+  `repo_gates`** instead of the single-app top-level `gates`. The reuse gate is
+  inherently repo-wide, so it now survives the charter's conversion to a multi-app
+  `targets` config untouched — previously it was dropped by `set-stack` (or had to be
+  hand-copied into every target). Existing single-app configs that carry a `gates.reuse`
+  entry keep working unchanged; re-run `init --reuse-check` (or move the entry to
+  `repo_gates`) to get the survives-conversion behavior.
+
 ## [1.3.0] - 2026-06-28
 
 ### Added

@@ -16,7 +16,8 @@ narration.
 
 ```mermaid
 flowchart LR
-    charter --> prd --> slice --> build --> verify --> done
+    charter --> prd --> slice --> check[check-contract] --> build --> verify --> done
+    check -. flagged: re-slice .-> slice
     verify -. opt-in .-> review --> done
 ```
 
@@ -28,8 +29,15 @@ flowchart LR
 - **slice** — a PRD becomes **vertical slices**: each small enough for one
   session's context, complete enough to build without guessing, with a **frozen
   contract**. (`/kuru:slice`, skill `slicing-work`)
+- **check-contract** *(advisory, pre-build)* — the `kuru-contract-critic` subagent
+  judges whether a frozen contract is **satisfiable** (something builds each AC — this
+  slice or an earlier done slice) and **verifiable in this environment**, *before* a
+  build is spent. Flags an AC nothing builds, or one that can't be checked in the deploy
+  topology. It changes no status; a flagged contract routes back to the planner for a
+  re-slice. (`/kuru:check-contract`, skill `checking-a-contract`)
 - **build** — the `kuru-builder` subagent implements ONE slice, runs gates, sets
-  status `built`. (`/kuru:build`, skill `building-a-slice`)
+  status `built`. It first runs `kuru env <id>` to read the target's deploy topology so
+  it builds tests that can actually run here. (`/kuru:build`, skill `building-a-slice`)
 - **verify** — a SEPARATE `kuru-verifier` subagent gatekeeps against the frozen
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
 - **review** *(opt-in)* — code review on the diff for slices that warrant a closer
@@ -162,6 +170,12 @@ slice carries a `target` (set at `/kuru:slice`). `kuru gate <id>` then runs only
 that target's gates, in that target's dir. A flat config behaves as one implicit
 `default` target, so nothing changes for single-app repos.
 
+**Repo-wide gates.** A check with no single owning app — the `dupehound` duplicate-code
+scan is the case `--reuse-check` seeds — goes in a top-level `repo_gates` map. It
+coexists with `targets` (doctor allows both), runs at the repo root for **every** slice
+on top of that slice's target gates, and `set-stack` never rewrites it — so a reuse gate
+seeded at `init` survives the conversion to a multi-app config untouched.
+
 ## kuru.py command reference
 
 Invoke as `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" <cmd>`.
@@ -179,14 +193,15 @@ repo, so resolve its path in this order:
 
 | Command | Effect |
 |---|---|
-| `init [--force] [--stack <tool>] [--profile DIR\|URL] [--reuse-check off\|warn\|block]` | Scaffold `.kuru/` (optionally from a build-tool preset, or a *catalog* of reusable env profiles — a local directory of `*.json`, a single file, or a GitHub/GitLab tree URL — stashed under `.kuru/profiles/` for the charter to match to apps). `--reuse-check` seeds a `dupehound check` duplicate-code gate: `warn` advisory, `block` required (needs the `dupehound` binary on PATH). |
+| `init [--force] [--stack <tool>] [--profile DIR\|URL] [--reuse-check off\|warn\|block]` | Scaffold `.kuru/` (optionally from a build-tool preset, or a *catalog* of reusable env profiles — a local directory of `*.json`, a single file, or a GitHub/GitLab tree URL — stashed under `.kuru/profiles/` for the charter to match to apps). `--reuse-check` seeds a `dupehound check` duplicate-code gate into top-level `repo_gates` (runs repo-wide for every slice; survives multi-app conversion): `warn` advisory, `block` required (needs the `dupehound` binary on PATH). |
 | `set-stack <tool> [--target N] [--discard-flat-gates \| --migrate-flat-gates-to NAME]` | Rewrite `config.json` gates from a preset: `node\|pnpm\|gradle\|maven\|go\|python\|cargo`. With `--target`, seed/replace just that one gate target (monorepo), preserving the others. When `--target` first converts a single-app (flat `gates`) config to multi-app, it **refuses** until you say what happens to the flat gates: `--discard-flat-gates` (drop the init default) or `--migrate-flat-gates-to NAME` (keep it as target `NAME`, `dir "."`). |
 | `new-slice "<title>" [--epic E] [--depends-on SL-..,SL-..] [--target N]` | Create `SL-NNNN` + artifacts; status `draft`. `--target` binds it to a `config.json` gate target (monorepo). |
 | `set-target <id> <target>` | Assign/repoint a slice to a `config.json` gate target. |
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
 | `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
+| `env <id> [--json]` | The resolved environment a slice's target runs in — follows the target's `profile` pointer to `.kuru/profiles/<name>.json` and prints its `environment` (deploy topology, `verification_access`) + `conventions`. The deterministic feed the builder/verifier read **before** choosing how to build/verify, so a test isn't built that can't run here. "NONE RECORDED" if no profile is pinned. |
 | `next [--json] [--slice <id>] [--all]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. With `--all`, **every** slice actionable now (deps satisfied) plus `waiting`/`draft`/`blocked`/`done` — the parallel batch `/kuru:loop-workflow` drives on. |
 | `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer] [--no-commit]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. **`--no-commit`** flips the ledger to `done` but skips the commit, leaving it to the caller (used by `/kuru:loop-workflow`, which commits once after the parallel run). Serialized by `.kuru/.ledger.lock` so parallel `loop-workflow` writes don't race. |
 | `gate <id> [--waive NAME[=REASON]]` | Run the slice's gates; write `gate-results.json`; non-zero on fail. In a multi-target repo, runs only the slice's target's gates, in that target's `dir`. `--waive` lets a **failing required** gate proceed for THIS run, recording the reason in `gate-results.json` (per-run only — not persisted; the verifier still sees it and may reject). |
 | `check <id>` | Read-only: may this slice reach `verified`? |
-| `doctor` | Validate the workspace. Hard ✗ on missing core files / no gates / unknown deps; a target `dir` that doesn't exist **yet** (a not-yet-built slice will create it) is a ⚠ warning, not a failure. |
+| `doctor` | Validate the workspace. Hard ✗ on missing core files / no gates / unknown deps / a `profile` pointer to a missing file; a target `dir` that doesn't exist **yet** (a not-yet-built slice will create it) and a target with **no `profile`/environment** are ⚠ warnings, not failures. |

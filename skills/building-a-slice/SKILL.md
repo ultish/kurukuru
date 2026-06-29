@@ -23,7 +23,15 @@ repo root. The `kuru-method` skill has the full resolution order.
    The contract is **locked** — do not change scope to match what's convenient. If
    the contract is genuinely wrong or impossible, **stop**, set the slice
    `blocked` with a note, and escalate to re-slicing. Do not quietly redefine done.
-2. **Get oriented.** Read `.kuru/progress.md` and the code/patterns the slice
+2. **Load the deploy topology.** Run `kuru env <id>` to read the slice's target
+   environment — deploy env, dependencies, air-gap constraints, and
+   `verification_access` (how the running system and its deps are actually reachable
+   here). This shapes the tests and observability you write: build them to run in
+   **this** topology, and never write a harness that assumes a dependency is reachable
+   in a way the environment forbids (e.g. an external integration test against an
+   in-cluster-only service — it can't pass and the verifier will reject it). No env
+   recorded → note it and prefer tests that don't depend on unstated reachability.
+3. **Get oriented.** Read `.kuru/progress.md` and the code/patterns the slice
    names. Conventions are something you **adopt, not assert**: where the codebase
    already has them (naming, error handling, test style), match them instead of
    inventing your own; where the slice context names a tool, skill, or reference
@@ -34,22 +42,22 @@ repo root. The `kuru-method` skill has the full resolution order.
    easy to get wrong by hand. If the named tooling genuinely seems wrong or
    unnecessary, you don't silently skip it — set the slice `blocked` with a note and
    escalate.
-3. **Make a vertical change.** Implement every layer the acceptance criteria need —
+4. **Make a vertical change.** Implement every layer the acceptance criteria need —
    data, service, API, UI — plus:
    - **Tests** that correspond to the acceptance criteria (a verifier will look
      for them by name).
    - **Observability** the NFRs require (logs/metrics/audit events).
    - Error and edge-case handling, not just the happy path.
-4. **Keep the build log current.** Append to `build-log.md`: decisions and
+5. **Keep the build log current.** Append to `build-log.md`: decisions and
    tradeoffs, files touched, and for **each AC** how it's satisfied and where the
    proof lives (test name, endpoint). This is what the verifier reads first.
-5. **Run the gates yourself.** `kuru gate <id>`. If red, fix and re-run until
+6. **Run the gates yourself.** `kuru gate <id>`. If red, fix and re-run until
    green. Green gates are the floor, not the ceiling. `kuru gate` streams each
    gate's output live **and** writes it to `.kuru/slices/<id>/gate-<name>.log`, so a
    long build (gradle, etc.) is watchable with `tail -f` and never looks "stuck".
    When you run a long build/test command *outside* the gate, do the same — never
    send its output to `/dev/null`; tee it to a log so progress is visible.
-6. **Hand off.** When gates are green and every AC is genuinely met:
+7. **Hand off.** When gates are green and every AC is genuinely met:
    `kuru set-status <id> built --by builder`. Tell the orchestrator it's ready for
    an **independent** verifier. **You may not set `verified`** — the engine will
    refuse it, and so should you.

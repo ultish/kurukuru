@@ -53,7 +53,7 @@ Repeat until a stop condition fires:
 
    | status | action |
    |---|---|
-   | `ready` / `in_progress` | dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build`) on exactly that slice. |
+   | `ready` / `in_progress` | **first**, if this slice hasn't passed the pre-build contract check this run, run it (see **Pre-build contract check** below). Only once it's `CONTRACT OK` do you dispatch a **fresh `kuru-builder`** subagent (as `/kuru:build`) on exactly that slice. |
    | `rejected` | dispatch a **fresh `kuru-builder`**, passing the verifier's rejection note so it fixes the named failures. |
    | `built` | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify`). |
    | `verifying` | a verification was claimed but not finished (e.g. a prior session died) → dispatch a **fresh `kuru-verifier`** (as `/kuru:verify`); no status change needed. |
@@ -61,6 +61,28 @@ Repeat until a stop condition fires:
    | `reviewed` | reviewed by hand in a prior session but not shipped → `set-status <id> done` (auto-commits, as above). |
 
 5. After each transition, briefly note progress, then loop.
+
+### Pre-build contract check (advisory, before the first build of a slice)
+
+Before a `ready` slice is built for the first time **this run**, gate it through the
+**kuru-contract-critic** (as `/kuru:check-contract <id>`) — this catches a contract no
+build could satisfy (an AC nothing builds, or one unverifiable in this environment)
+*before* a build→verify loop is wasted on it.
+
+- **CONTRACT OK** → mark it checked for this run and proceed to build.
+- **CONTRACT FLAGGED** → run the **contract-repair cycle** instead of building:
+  1. `set-status <id> draft`, then dispatch a **fresh `kuru-planner`** subagent with the
+     critic's flags (and `contract-review.md`) to rewrite `contract.yml`/`slice.md` so
+     every AC is satisfiable and verifiable in this environment. The planner re-freezes:
+     `set-status <id> ready`.
+  2. Re-run the critic. If `CONTRACT OK`, proceed to build; if still flagged, repeat.
+  3. **Cap it with `max-reject-retries`** (the same per-run budget): count each repair
+     attempt for the slice. If it can't reach `CONTRACT OK` within the cap, STOP —
+     `set-status <id> blocked --note "contract un-satisfiable after N repair attempts:
+     <last flags>"` — and hand to a human. Never re-slice forever.
+
+The critic is **advisory** — it never changes status or edits the contract itself; the
+planner does the repair, the engine records the `draft→ready` transitions.
 
 ### Hard guardrails (these are the point — do not skip)
 
@@ -76,10 +98,15 @@ Repeat until a stop condition fires:
   one. When a slice's this-run tally reaches `max-reject-retries`, STOP:
   `set-status <id> blocked --note "exceeded N build/verify retries this run: <last
   failure>"` and hand to a human. Do not spin forever.
-- **`blocked` means stop, not skip.** If a builder or verifier sets a slice
-  `blocked` (wrong/impossible contract, gates that genuinely can't go green), do
-  **not** route around it — STOP and surface it. "Nothing actionable" while a slice
-  is `blocked` is a failure, not success.
+- **Check the contract before building, repair before looping.** Don't dispatch a
+  builder on a `ready` slice that hasn't gone `CONTRACT OK` this run. A flagged contract
+  is repaired by the **planner** (a fresh subagent, distinct from builder/verifier) via
+  the `draft→ready` cycle above — never by the critic, the builder, or hand-editing
+  `contract.yml`. Contract-repair attempts count toward `max-reject-retries`.
+- **`blocked` means stop, not skip.** If a builder, verifier, or the contract-repair
+  cycle sets a slice `blocked` (wrong/impossible contract, gates that genuinely can't go
+  green), do **not** route around it — STOP and surface it. "Nothing actionable" while a
+  slice is `blocked` is a failure, not success.
 - **Never fabricate progress.** You only ever change status through `kuru.py`; you
   never hand-edit `ledger.json`/`gate-results.json`. The engine's gate + role rules
   stand — if they refuse a transition, that is a real signal, not an obstacle.
