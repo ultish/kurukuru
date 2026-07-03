@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-03
+
+### Changed
+- **PRD files are now auto-numbered `prd-N`.** `/kuru:prd` assigns the next sequential
+  id (scanning `.kuru/prd/`) instead of asking the user to name the file; any argument
+  is treated as the feature *topic* (content), not the filename. The id doubles as the
+  epic tag every slice under that PRD carries — a display-only grouping label in
+  `kuru ls`, so `/kuru:slice prd-N` tags slices `--epic prd-N`. No engine change:
+  `--epic` was already free-form. Docs updated in `commands/prd.md`, `commands/slice.md`,
+  `agents/kuru-planner.md`, `skills/writing-prds`, `skills/kuru-method`, and `README.md`.
+- **`/kuru:prd` now asks where the topic comes from** instead of inferring it: when the
+  session already holds feature-relevant context, it prompts *use current session
+  context* vs. *discuss the PRD fresh* (via `AskUserQuestion`) before drafting. A cold
+  `/kuru:prd` skips the prompt and just discusses. Either way it reflects scope back and
+  resolves Open questions before drafting — session context seeds, never freezes.
+
 ## [1.5.2] - 2026-06-29
 
 ### Changed

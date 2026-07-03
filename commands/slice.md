@@ -1,6 +1,6 @@
 ---
 description: Decompose a PRD into vertical slices with frozen contracts.
-argument-hint: "<feature-name>"
+argument-hint: "<prd-id>  (e.g. prd-3 — becomes each slice's epic tag)"
 ---
 
 Use the `slicing-work` skill.

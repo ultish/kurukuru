@@ -154,7 +154,7 @@ Four rules are enforced **in code** — you cannot talk your way past them:
 | `.kuru/ledger.json` | **machine** — slices + status + history | `kuru.py` only |
 | `.kuru/slices/<id>/gate-results.json` | **machine** — gate pass/fail | `kuru gate` |
 | `.kuru/charter.md` | narrative | charter session |
-| `.kuru/prd/<f>.md` | narrative | planner |
+| `.kuru/prd/prd-N.md` (auto-numbered) | narrative | planner |
 | `.kuru/slices/<id>/slice.md` | narrative spec | slicer |
 | `.kuru/slices/<id>/contract.yml` | narrative, **frozen at `ready`** | slicer |
 | `.kuru/slices/<id>/build-log.md` | narrative | builder |

@@ -97,8 +97,8 @@ Then, in Claude Code:
 
 ```
 /kuru:charter            # build shared understanding -> .kuru/charter.md
-/kuru:prd <feature>      # charter -> .kuru/prd/<feature>.md  (kuru-planner)
-/kuru:slice <feature>    # PRD -> vertical slices with frozen contracts
+/kuru:prd [topic]        # charter -> .kuru/prd/prd-N.md  (auto-numbered; kuru-planner)
+/kuru:slice prd-N        # PRD -> vertical slices with frozen contracts (epic tag = prd-N)
 /kuru:check-contract     # OPTIONAL pre-build: is a slice's contract satisfiable + verifiable here?
 /kuru:build              # kuru-builder implements the next ready slice -> built
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
@@ -389,7 +389,7 @@ The `.kuru/` workspace (per target repo, created by `kuru init`):
 ```
 .kuru/
 ├── config.json   ledger.json   charter.md   progress.md   init.sh
-├── prd/<feature>.md
+├── prd/prd-N.md
 └── slices/<id>/  slice.md  contract.yml  build-log.md  verification.md  gate-results.json
 ```
 

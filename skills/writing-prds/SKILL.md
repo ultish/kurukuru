@@ -62,4 +62,6 @@ doesn't belong here yet — raise it as an open question, don't invent scope.
   becomes a guess baked into a contract. Only questions the user explicitly agrees
   are non-blocking may carry forward, marked `DEFERRED (non-blocking)`.
 
-Write the PRD to `.kuru/prd/<feature>.md`.
+Write the PRD to `.kuru/prd/<id>.md` — the file is **auto-numbered** `prd-N` (the
+`/kuru:prd` command assigns the next sequential id; you never name it). That id is
+also the epic tag every slice under this PRD carries.

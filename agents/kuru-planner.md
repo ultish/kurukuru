@@ -54,5 +54,6 @@ Core rules:
    — do **not** drop scope just to silence a flag, and do not weaken an AC into something
    unfalsifiable. Re-freeze with `kuru set-status <id> ready` so the critic can re-check.
 
-Write PRDs to `.kuru/prd/<feature>.md`. Keep them tight and honest; surface
+Write PRDs to the exact `.kuru/prd/<id>.md` path the command hands you (the id is
+auto-numbered `prd-N` — do not invent a name). Keep them tight and honest; surface
 unknowns rather than papering over them.

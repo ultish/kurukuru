@@ -1,11 +1,37 @@
 ---
 description: Turn the charter into a production PRD for a feature/epic.
-argument-hint: "<feature-name>"
+argument-hint: "[optional: feature/topic — the PRD file is auto-numbered prd-N]"
 ---
 
 Use the `writing-prds` skill.
 
-Target feature: **$ARGUMENTS** (if empty, ask which feature).
+**Assign the PRD id — never ask the user to name the file.** PRDs are numbered
+sequentially. Compute the next id by scanning `.kuru/prd/`:
+
+```
+n=$(ls .kuru/prd/ 2>/dev/null | grep -Eo '^prd-[0-9]+\.md$' | sed -E 's/prd-([0-9]+)\.md/\1/' | sort -n | tail -1); echo "prd-$(( ${n:-0} + 1 ))"
+```
+
+Call the result **`<id>`** (e.g. `prd-1`, `prd-2`, …). It is the filename stem and
+the epic tag every slice under this PRD will carry — nothing reads it for logic
+(it's display-only in `kuru ls`), so it stays an opaque sequential handle by design.
+
+**Establish the topic — ask which source, don't guess it.** The PRD's *content*
+comes from one of two places; `$ARGUMENTS`, if given, only *seeds* it and never names
+the file. Pick the source explicitly:
+
+- If the session holds no feature-relevant context yet (a cold `/kuru:prd`), skip the
+  prompt and just discuss what to build.
+- Otherwise **ask the user first** (use `AskUserQuestion`), before drafting anything:
+  - **Use current session context** — synthesize the topic and requirements from what
+    we've already discussed this session.
+  - **Discuss the PRD** — run a fresh discovery conversation to establish what this PRD
+    should cover, setting the session chatter aside as the basis.
+
+Whichever source: **reflect the understood scope back and confirm it, then resolve
+gaps as Open questions before drafting.** The session (or `$ARGUMENTS`) is a starting
+draft, never the final word — a subagent will freeze this into contracts, so inferred
+intent must be *confirmed*, not assumed. Never ask the user to name the file.
 
 Read `.kuru/charter.md` first. Then dispatch the **kuru-planner** subagent to
 draft the PRD, grounded in the actual codebase. The PRD must cover problem &
@@ -15,7 +41,8 @@ reliability/failure modes, performance/SLOs, observability, a11y/i18n,
 migration/rollout), data & interface deltas, dependencies & risks, and an explicit
 **acceptance shape**.
 
-Write it to `.kuru/prd/$ARGUMENTS.md`.
+Write it to `.kuru/prd/<id>.md` (the auto-assigned id — e.g. `prd-3.md` — not the
+topic text). Tell the planner that exact path when you dispatch it.
 
 **Gate: resolve open questions before slicing.** When the planner returns, walk the
 user through **every** open question it surfaced — ask them directly (use
@@ -27,4 +54,4 @@ the user's explicit agreement, marked `DEFERRED (non-blocking): <why>`.
 Do **not** point the user to `/kuru:slice` while any blocking open question is
 unresolved — slicing on top of unanswered questions bakes guesses into frozen
 contracts. Only once Open questions are answered (or explicitly deferred) tell them
-to run `/kuru:slice $ARGUMENTS`.
+to run `/kuru:slice <id>` (the auto-assigned id, e.g. `/kuru:slice prd-3`).
