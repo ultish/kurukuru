@@ -42,6 +42,30 @@ repo root. The `kuru-method` skill has the full resolution order.
    easy to get wrong by hand. If the named tooling genuinely seems wrong or
    unnecessary, you don't silently skip it — set the slice `blocked` with a note and
    escalate.
+   - **Consult the reuse index before you author.** If a `codebase-memory-mcp` index
+     exists for this repo, query it *before* writing any shared/util/common code or a
+     new instance of an existing pattern — this is how you avoid rebuilding something
+     that already exists and how you match house conventions instead of inventing them.
+     It's **best-effort**: probe once with
+     `codebase-memory-mcp cli list_projects '{}'` (resolve the `<project>` name there);
+     if the binary or index isn't present, skip this and move on — never block a build
+     on it.
+     - *Does this already exist?* — before authoring a helper, search by intent:
+       `codebase-memory-mcp cli search_graph '{"project":"<project>","query":"<what it does>","limit":8}'`.
+       If a hit already does the job, **import or extend it** instead of writing a
+       duplicate; if it's close but private, prefer promoting it over copying.
+     - *How do we do X here?* — same query for a pattern ("graphql mutation",
+       "db save transaction", "audit log event") → copy the established shape rather
+       than a generic one. `get_code_snippet '{"project":"<project>","qualified_name":"<qn>"}'`
+       pulls the full definition of a hit.
+     - The default `query` is lexical (BM25) and is the dependable workhorse —
+       **run it first.** `semantic_query` (a **keyword array**, e.g.
+       `["serialize","persist","json"]`, scored per-keyword by cosine) is a **fallback
+       for the divergent-naming case**: reach for it only when BM25 comes back empty or
+       off-target *and* the repo is large enough that the team plausibly named the thing
+       differently than you'd search for it. It's noisy on small repos, so treat its
+       hits as leads to confirm by reading the code, never as authority. There's no
+       config switch — it's your judgment call, per query.
 4. **Make a vertical change.** Implement every layer the acceptance criteria need —
    data, service, API, UI — plus:
    - **Tests** that correspond to the acceptance criteria (a verifier will look
@@ -51,6 +75,16 @@ repo root. The `kuru-method` skill has the full resolution order.
 5. **Keep the build log current.** Append to `build-log.md`: decisions and
    tradeoffs, files touched, and for **each AC** how it's satisfied and where the
    proof lives (test name, endpoint). This is what the verifier reads first.
+   - **Record the reuse lookup as one machine-readable line** so the feature is
+     measurable across slices. Emit exactly one line into `build-log.md`:
+     `REUSE-LOOKUP {"used":<bool>,"queries":<int>,"candidates":<int>,"reused":<bool>,"semantic":<bool>,"detail":"<one line>"}`
+     — `used`/`queries`/`candidates`/`semantic` are **facts you observed** (did you
+     query, how many searches, how many hits came back, did you fall back to
+     `semantic_query`); `reused` + `detail` are your **honest report** of whether a
+     hit replaced new code (e.g. `"extended formatMoney instead of a new formatter"`).
+     If the index wasn't available, write `{"used":false,...}` with zeros. One line
+     per slice; aggregate later with
+     `grep -h '^REUSE-LOOKUP' .kuru/slices/*/build-log.md`.
 6. **Run the gates yourself.** `kuru gate <id>`. If red, fix and re-run until
    green. Green gates are the floor, not the ceiling. `kuru gate` streams each
    gate's output live **and** writes it to `.kuru/slices/<id>/gate-<name>.log`, so a

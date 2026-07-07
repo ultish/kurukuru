@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-07
+
+### Added
+- **Proactive reuse lookup in the builder + `kuru reuse-stats`.** The `building-a-slice`
+  skill now has the builder consult a [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
+  index (best-effort, skipped if absent) *before* authoring shared/util code or a new
+  pattern instance — reuse/extend/promote an existing symbol instead of duplicating, and
+  match house patterns ("how do we do db saves / graphql mutations"). Lexical `query`
+  (BM25) is the default; `semantic_query` is a builder-judgment fallback for the
+  divergent-naming case (no config toggle). Each build emits one machine-readable
+  `REUSE-LOOKUP {json}` line into `build-log.md`, and `kuru reuse-stats [--json]` rolls
+  those up across slices (index-used rate, reuse rate, semantic-fallback, query totals).
+  Advisory only — the `reused`/`detail` fields are the builder's self-report; nothing gates.
+
 ## [1.6.0] - 2026-07-03
 
 ### Changed

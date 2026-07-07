@@ -24,6 +24,7 @@ Usage:
   kuru gate <id>                    run the configured deterministic gates
   kuru check <id>                   print whether <id> may advance to 'verified'
   kuru doctor                       sanity-check the .kuru workspace
+  kuru reuse-stats                  roll up builders' REUSE-LOOKUP records (reuse index usage)
 
 Statuses (the slice state machine):
   draft -> ready -> in_progress -> built -> verifying -> verified -> done
@@ -629,6 +630,102 @@ def cmd_show(args):
     for f in artfiles:
         p = sdir / f
         print(f"  {'✓' if p.exists() else '·'} {p}")
+
+
+def _reuse_lookup_record(sid: str):
+    """The last parsed `REUSE-LOOKUP {json}` line from a slice's build-log, or None.
+    The builder emits one such line per build (building-a-slice skill §5); on a
+    rebuilt slice the most recent valid line wins. Malformed lines are skipped."""
+    p = kuru_dir() / "slices" / sid / "build-log.md"
+    if not p.exists():
+        return None
+    rec = None
+    for line in p.read_text().splitlines():
+        t = line.strip()
+        if not t.startswith("REUSE-LOOKUP"):
+            continue
+        i = t.find("{")
+        if i < 0:
+            continue
+        try:
+            rec = json.loads(t[i:])
+        except ValueError:
+            continue
+    return rec
+
+
+def cmd_reuse_stats(args):
+    """Roll up the builders' REUSE-LOOKUP records across slices — how often the reuse
+    index (codebase-memory) was consulted and how often it prevented a duplicate.
+    Advisory only: `reused`/`detail` are the builder's self-report, so nothing here
+    gates. Read-only over each slice's build-log; never touches the ledger."""
+    led = load_ledger()
+    rows = []
+    for s in led["slices"]:
+        built = any(h.get("status") == "built" for h in s.get("history", []))
+        rows.append({"id": s["id"], "status": s["status"], "built": built,
+                     "record": _reuse_lookup_record(s["id"])})
+
+    built = [r for r in rows if r["built"]]
+    reported = [r for r in rows if r["record"] is not None]
+    used = [r for r in reported if r["record"].get("used")]
+    reused = [r for r in used if r["record"].get("reused")]
+    semantic = [r for r in used if r["record"].get("semantic")]
+    missing = [r for r in built if r["record"] is None]
+    q_total = sum(int(r["record"].get("queries") or 0) for r in reported)
+    c_total = sum(int(r["record"].get("candidates") or 0) for r in reported)
+
+    summary = {
+        "slices_total": len(rows),
+        "built": len(built),
+        "reported": len(reported),
+        "missing_report": len(missing),
+        "index_used": len(used),
+        "led_to_reuse": len(reused),
+        "semantic_fallback": len(semantic),
+        "queries_total": q_total,
+        "candidates_total": c_total,
+        "reuse_rate": round(len(reused) / len(used), 2) if used else None,
+    }
+
+    if getattr(args, "json", False):
+        print(json.dumps({"summary": summary,
+                          "slices": [{"id": r["id"], "status": r["status"],
+                                      "built": r["built"], "reuse_lookup": r["record"]}
+                                     for r in rows if r["built"] or r["record"]]},
+                         indent=2))
+        return
+
+    print("Reuse-lookup stats (codebase-memory)")
+    if summary["missing_report"]:
+        print(f"  built slices:       {summary['built']}")
+        print(f"  recorded a lookup:  {summary['reported']}   "
+              f"({summary['missing_report']} built slice(s) emitted no REUSE-LOOKUP line)")
+    else:
+        print(f"  built slices:       {summary['built']}")
+        print(f"  recorded a lookup:  {summary['reported']}")
+    if not reported:
+        print("  (no builds have recorded a reuse lookup yet)")
+        return
+    rate = f"   ({int(summary['reuse_rate'] * 100)}%)" if summary["reuse_rate"] is not None else ""
+    print(f"  index used:         {summary['index_used']}/{summary['reported']}")
+    print(f"  led to reuse:       {summary['led_to_reuse']}/{summary['index_used']}{rate}")
+    print(f"  semantic fallback:  {summary['semantic_fallback']}/{summary['index_used']}")
+    print(f"  totals:             {summary['queries_total']} queries, "
+          f"{summary['candidates_total']} candidates seen")
+    print("\nper slice:")
+    for r in rows:
+        rec = r["record"]
+        if rec is None:
+            if r["built"]:
+                print(f"  {r['id']:<9} (no reuse-lookup line)")
+            continue
+        used_s = "used" if rec.get("used") else "skip"
+        reused_s = "reuse" if rec.get("reused") else "  — "
+        sem_s = " +sem" if rec.get("semantic") else ""
+        detail = f"  {rec.get('detail')}" if rec.get("detail") else ""
+        print(f"  {r['id']:<9} {used_s} {reused_s} "
+              f"q{int(rec.get('queries') or 0)} c{int(rec.get('candidates') or 0)}{sem_s}{detail}")
 
 
 def cmd_env(args):
@@ -1285,6 +1382,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_gate)
     s = sub.add_parser("check"); s.add_argument("id"); s.set_defaults(fn=cmd_check)
     s = sub.add_parser("doctor"); s.set_defaults(fn=cmd_doctor)
+    s = sub.add_parser("reuse-stats"); s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_reuse_stats)
     return p
 
 

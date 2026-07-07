@@ -239,6 +239,27 @@ $KURU next --slice SL-0003 --json | grep -q '"reason": "blocked"' \
   && ok "next --slice on a blocked slice -> none/blocked" || fail "blocked reason wrong"
 expect_fail "next --slice on a missing id errors" "no slice" $KURU next --slice SL-9999 --json
 
+echo "== reuse-stats: rolls up builders' REUSE-LOOKUP lines =="
+newrepo >/dev/null
+$KURU init >/dev/null; trivial_gates
+$KURU new-slice "reused one" >/dev/null   # SL-0001 — built, records a reuse
+$KURU new-slice "silent one" >/dev/null   # SL-0002 — built, emits no line
+$KURU new-slice "not built"  >/dev/null   # SL-0003 — never built (excluded)
+for s in SL-0001 SL-0002; do
+  $KURU set-status $s ready >/dev/null
+  $KURU set-status $s in_progress --by builder >/dev/null
+  $KURU set-status $s built --by builder >/dev/null
+done
+printf '\nREUSE-LOOKUP {"used":true,"queries":2,"candidates":3,"reused":true,"semantic":false,"detail":"extended X"}\n' >> .kuru/slices/SL-0001/build-log.md
+rs="$($KURU reuse-stats --json)"
+echo "$rs" | grep -q '"built": 2'          && ok "reuse-stats counts built slices, excludes unbuilt" || fail "built count wrong: $rs"
+echo "$rs" | grep -q '"reported": 1'        && ok "reuse-stats counts recorded lookups"              || fail "reported wrong: $rs"
+echo "$rs" | grep -q '"missing_report": 1'  && ok "reuse-stats flags a built slice with no line"     || fail "missing_report wrong: $rs"
+echo "$rs" | grep -q '"led_to_reuse": 1'    && ok "reuse-stats counts reuse outcomes"                || fail "led_to_reuse wrong: $rs"
+# a malformed REUSE-LOOKUP line must never crash the rollup
+printf '\nREUSE-LOOKUP {not valid json\n' >> .kuru/slices/SL-0002/build-log.md
+expect_ok "reuse-stats tolerates a malformed REUSE-LOOKUP line" $KURU reuse-stats
+
 echo "== auto-commit: marking a slice done commits the working tree =="
 newrepo >/dev/null; repo="$(pwd)"
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "auto commit me" >/dev/null
