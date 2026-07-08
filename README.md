@@ -135,13 +135,16 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
   workflows enabled.)
 - **Headless / unattended:** [`runner.py`](runner.py) — sequential — see below.
 
-Across all three, `max-reject-retries` is **per run**: re-running a `loop*` command
-resets every slice's retry tally, so the cap governs only the current run.
+Across all three, `max-tries` is **per run**: re-running a `loop*` command resets every
+slice's try tally, so the cap governs only the current run. A **try** is one full
+`build → verify` cycle, counted at the build — so a failed *build* (the builder gives up →
+`blocked`) is retried with a fresh agent just like a verify rejection, up to `max-tries`.
+A slice already blocked before the run is left for a human, not auto-retried.
 
 Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
 spawn a fresh builder and a separate verifier per slice, respect inter-slice
-**dependencies**, and stop on any `blocked` slice or after `--max-retries`
-rejections. The manual `/kuru:*` commands still work alongside either.
+**dependencies**, and stop on a slice blocked at start or after a slice exhausts its
+`max-tries` build→verify budget. The manual `/kuru:*` commands still work alongside either.
 
 ### Environment profiles (reuse a stack across projects)
 

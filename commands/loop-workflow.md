@@ -1,6 +1,6 @@
 ---
 description: Drive ready slices through PER-SLICE build→verify→ship pipelines by authoring and launching a Claude Code dynamic workflow — same-target slices serialize (one shared tree), different-target slices run in parallel, all dependency-ordered. Fresh context per build/verify/ship. Optionally scope to a single slice or a comma-separated set.
-argument-hint: "[slice-id | id1,id2,... ] [max-reject-retries, default 2]"
+argument-hint: "[slice-id | id1,id2,... ] [max-tries, default 2]"
 ---
 
 Use the `loop-workflow` skill for context — it holds the full design and the reference script.
@@ -48,10 +48,11 @@ subtrees can't contaminate each other). **Dependency-ordered**: a slice starts o
 Before a slice's **first build this run**, its pipeline runs an advisory **contract check**
 (`/kuru:check-contract <id>`): a flagged contract is repaired by the planner (`draft` → rewrite →
 `ready`) and re-checked before any build, so a build→verify loop is never wasted on a contract no
-build could satisfy. A `rejected` verdict loops the slice back through build **within its own
-pipeline** (capped by its per-run tally); the reject/repair caps and the
-blocked-stops-a-slice-and-its-dependents rule are enforced
-in the script. A single-target repo therefore runs fully sequentially (correct — you can't safely
+build could satisfy. **Any** failed build→verify cycle — a verify `rejected`, a build that goes
+`blocked`, or a verify with no recorded verdict — loops the slice back through a fresh build
+**within its own pipeline** and consumes one **try** (one try = one full build→verify cycle),
+capped by `maxTries`; the try/repair caps and the blocked-stops-a-dependent rule are enforced in
+the script. A single-target repo therefore runs fully sequentially (correct — you can't safely
 parallelize one tree without worktrees); a polyglot/monorepo runs one pipeline per app at once.
 
 ## Arguments (`$ARGUMENTS`)
@@ -64,8 +65,11 @@ Parse up to two tokens, in any order, and pass them through as the workflow's `a
   named slices on **different** gate targets run in parallel, named slices on the **same** target
   serialize. A single id is the degenerate **single-slice** case. Omit the scope entirely to drive
   the **whole board**.
-- A bare **integer** → **`args.maxRejectRetries`** (default **2**): how many times a slice may be
-  rejected/sent-back **in this run** before the workflow stops driving it and surfaces it.
+- A bare **integer** → **`args.maxTries`** (default **2**): how many **build→verify tries** a slice
+  gets **in this run** before the workflow stops driving it and surfaces it. One try is a full
+  `build → verify` cycle: the first build→verify is try 1; a `rejected` verdict sends the slice back
+  through build **and** re-verify, which is try 2; and so on. After the try-`maxTries` verify is
+  rejected, the slice is capped.
 
 So: `/kuru:loop-workflow` · `/kuru:loop-workflow 5` · `/kuru:loop-workflow SL-0002` ·
 `/kuru:loop-workflow SL-0002 5` · `/kuru:loop-workflow SL-0001,SL-0002,SL-0011` ·
@@ -78,7 +82,7 @@ different apps run in parallel; on the same app they run one after the other. Th
 must ensure: a dependency of a named slice that isn't itself in the set must already be `done`, or
 that slice can't ship (the workflow reports it rather than silently pulling the dep in).
 
-**Retries are per-run.** Each launch starts every slice's tally at 0 — re-launching resets the
+**Tries are per-run.** Each launch starts every slice's tally at 0 — re-launching resets the
 budget. Do not read the lifetime `rejections` from `show`.
 
 ## Preconditions — refuse to author/launch unless ALL hold

@@ -23,8 +23,15 @@ Division of labour (deliberate):
   • The runner DECIDES (what's next, retries, when to stop) — never by asking a
     model; `kuru.py` is the brain.
   • The `claude -p` session DOES the work and is the only thing that writes
-    progress status, so the engine's gate + role rules still gate every
-    transition. The runner only escalates to `blocked` when it gives up.
+    *progress* status (`built`, `verified`), so the engine's gate + role rules still
+    gate every real transition. The runner only writes two safety statuses itself:
+    `blocked` when it finally gives up, and the retry-reset (`blocked`/`verifying`
+    -> `in_progress`) that re-queues a failed build — never fabricated progress.
+
+Retries: a TRY is one build->verify cycle, counted at the build that starts it, so
+a failed *build* (the builder gives up -> `blocked`) counts and is retried with a
+fresh process just like a verify rejection — up to `--max-tries` per slice, per run.
+Only a slice already blocked before the run began is left for a human untouched.
 
 Preconditions: charter + PRD + frozen (non-draft) slices must already exist (in
 `--slice` mode, only the named slice and its dependencies need contracts). The
@@ -65,7 +72,7 @@ class Runner:
         self.repo = Path(args.repo).resolve()
         self.plugin_dir = Path(args.plugin_dir).resolve()
         self.kuru = str(self.plugin_dir / "scripts" / "kuru.py")
-        self.max_retries = args.max_retries
+        self.max_tries = args.max_tries
         self.max_iters = args.max_iters
         self.dry_run = args.dry_run
         self.slice = (args.slice or "").upper() or None   # --slice: drive only this id
@@ -93,8 +100,9 @@ class Runner:
         )
 
     def block(self, sid: str, note: str):
-        """Escalate a slice to `blocked` and stop. This is the only status the
-        runner ever writes — a safety stop, never fabricated progress."""
+        """Escalate a slice to `blocked` and stop — a safety stop, never fabricated
+        progress. The runner writes only this and the retry-reset to `in_progress`
+        (see the loop); it never writes `built`/`verified`."""
         self.kuru_run("set-status", sid, "blocked", "--note", note)
         print(f"  ! {sid} -> blocked: {note}")
 
@@ -183,6 +191,7 @@ class Runner:
         done_count = 0
         last_key = None       # (sid, status) we acted on last iteration
         stalls = 0
+        tries = {}            # sid -> build->verify cycles started this run (the try budget)
         target = self.slice
 
         for i in range(1, self.max_iters + 1):
@@ -234,14 +243,17 @@ class Runner:
 
             print(f"[{i}] {sid} [{status}] -> {action}  ({nxt['title']})")
 
-            # retry cap on the reject cycle (a slice lands in `rejected` from the
-            # verifier — or from a manual /kuru:review send-back — and counts here).
-            if status == "rejected":
-                info = self.kuru_json("show", sid, "--json")
-                if info.get("rejections", 0) >= self.max_retries:
-                    self.block(sid, f"exceeded {self.max_retries} verify/review rejections")
+            # Per-run try cap. A TRY is one build->verify cycle, counted at the build
+            # that starts it — so a failed *build* (builder gave up -> blocked, reset
+            # to in_progress below) costs a try just like a verify rejection (rejected
+            # -> action 'build'). Exhaust the budget -> stop for a human. Per run: the
+            # `tries` map starts empty each run, so a re-run gets a fresh budget.
+            if action == "build":
+                if tries.get(sid, 0) >= self.max_tries:
+                    self.block(sid, f"exhausted {self.max_tries} build->verify tries this run")
                     print("   Stopping for a human.")
                     return 1
+                tries[sid] = tries.get(sid, 0) + 1
 
             # stall guard: same slice+status again after we acted = no progress;
             # allow one retry, then block (i.e. stop on the third consecutive sighting)
@@ -264,9 +276,26 @@ class Runner:
                 print(f"   claude exited {rc}; re-reading state and continuing.")
 
             after = self.kuru_json("show", sid, "--json")
-            if after["status"] == "done" and status != "done":
+            st = after["status"]
+            if st == "done" and status != "done":
                 done_count += 1
-            last_key = key
+                last_key = key
+            elif st == "blocked" and tries.get(sid, 0) < self.max_tries:
+                # A build/verify that gave up mid-run is a FAILED try, not a stop:
+                # reset to a buildable status so the next iteration rebuilds with a
+                # fresh process. The build-dispatch cap above bounds the retries, then
+                # blocks for a human. Clear the stall tracking so the retried build
+                # isn't mistaken for a no-progress stall.
+                self.kuru_run("set-status", sid, "in_progress",
+                              "--note", "retry after a failed build/verify")
+                print(f"  ↻ {sid} blocked -> in_progress "
+                      f"(retry; {tries.get(sid, 0)}/{self.max_tries} tries used)")
+                last_key = None
+                stalls = 0
+            else:
+                # blocked with the try budget already spent -> leave it for a human
+                # (next iteration surfaces it via `next` and stops).
+                last_key = key
 
         print(f"\n⚠ Hit --max-iters ({self.max_iters}) without clearing the board.")
         return 1
@@ -281,8 +310,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugin-dir", default=str(here),
                    help="the kuru plugin directory (default: the directory holding this script). "
                         "Set this if you move runner.py out of the plugin repo.")
-    p.add_argument("--max-retries", type=int, default=2,
-                   help="per-slice rejection cap (verifier or manual review) before blocking (default 2)")
+    p.add_argument("--max-tries", "--max-retries", dest="max_tries", type=int, default=2,
+                   help="per-slice, per-run cap on build->verify TRIES before blocking (default 2). "
+                        "One try = one full build->verify cycle; a failed build (blocked) costs a "
+                        "try and is retried just like a verify rejection. (--max-retries: alias.)")
     p.add_argument("--max-iters", type=int, default=100,
                    help="global safety cap on loop iterations (default 100)")
     p.add_argument("--permission-mode", default="bypassPermissions",

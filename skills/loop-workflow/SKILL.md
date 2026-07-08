@@ -111,18 +111,27 @@ extra round" tax.
 Concretely the script runs a small **target-mutex scheduler**: repeatedly start every slice that
 is live, has its deps `done`, and whose target is currently free; then await the next pipeline to
 finish (which frees its target and may unlock dependents) and repeat, until nothing is running and
-nothing new can start. A `rejected` verdict loops the slice back through build **within its own
-pipeline** (capped by its per-run tally); `blocked`/`capped`/`stuck` stop that slice and surface
-it. State routing is the state machine: `ready`/`in_progress`/`rejected` → build,
-`built`/`verifying` → verify, `verified`/`reviewed` → ship.
+nothing new can start.
+
+**A try is one `build → verify` cycle, and the budget bounds cycles — not just verify
+rejections.** `maxTries` (default 2) is how many build→verify cycles a slice gets in this run. A
+try is counted at the **build** that starts it, so **any** failed cycle consumes one and loops the
+slice back to a fresh build: a verify that `rejected`s, a build that goes `blocked` (the builder
+gave up / gates stayed red), a verify that recorded **no verdict** (`verifying`), or an agent that
+threw. The build stage normalizes a retried slice first (`blocked` → `in_progress`, `verifying` →
+`rejected`) so the next build can run. The slice is `capped` only once the try budget is spent —
+so a slice that keeps failing on the **build** side now gets its full `maxTries` attempts (each a
+fresh-context builder) instead of stopping at the first block. State routing: `ready` /
+`in_progress` / `rejected` / `blocked` / `verifying` → build (start/retry a cycle), `built` →
+verify, `verified` / `reviewed` → ship.
 
 **Pre-build contract check (advisory).** Before a slice's **first build this run** (status
 `ready`/`in_progress`, not `rejected`), its pipeline runs the **contract critic**
 (`/kuru:check-contract <id>`) — catching a contract no build could satisfy (an AC nothing builds,
 or one unverifiable in this env) before a build→verify loop is wasted. `CONTRACT OK` → build;
 `CONTRACT FLAGGED` → a **repair** stage routes it back through the planner (`draft` → rewrite from
-the flags → `ready`) and re-checks, capped by `MAX_RETRIES` (a contract that won't converge is
-`capped`, exactly like an exhausted reject budget). The critic is advisory — it changes no status
+the flags → `ready`) and re-checks, capped by `MAX_TRIES` (a contract that won't converge is
+`capped`, exactly like an exhausted try budget). The critic is advisory — it changes no status
 and the planner does the repair; this is all **inside the slice's own pipeline**, so it serializes
 under the same target mutex.
 
@@ -144,22 +153,26 @@ under the same target mutex.
   `verified`), and the slice goes nowhere. The fix is the read-back: the verify prompt makes
   recording the verdict the agent's load-bearing output and makes it report the status the ledger
   shows.
-- **Route every slice by its *current* status through the `ACTION` table** — `build` for
-  `ready`/`in_progress`/`rejected`, `verify` for `built`/`verifying`, `ship` for
-  `verified`/`reviewed`. A stage that returns a status routing back to **itself** (e.g. a verify
-  that leaves the slice `verifying` — no verdict recorded — or a ship the engine refused) is **not
-  progress**: stop that slice and report it `stuck` rather than re-running the same stage. The
-  reference `drivePipeline` does exactly this (`ACTION[newStatus] === action` ⇒ stuck).
-- **Cap the send-back cycle, per run.** The script keeps a per-slice reject tally (starts at 0).
-  When a verify returns `rejected`, increment; once it hits `maxRejectRetries` (default 2),
-  **stop driving that slice** (report it `capped`). Do not auto-flip it to `blocked` (there is no
-  `/kuru:*` verb for that and agents can't run `kuru.py`) — leaving it `rejected` and reporting it
-  is enough; a re-run gets a fresh budget.
-- **`blocked` stops a slice and its dependents, not the whole board.** If a build/verify leaves a
-  slice `blocked` (or it was blocked at start), it's dropped from scheduling, and any slice that
-  depends on it never starts (its dep can't ship) and is reported `stuck`. **Independent slices
-  still finish** — this is completing the safe work, not routing around a block — and every
-  blocked/stuck/capped slice is surfaced at the end for a human.
+- **Route every slice by its *current* status** — build for
+  `ready`/`in_progress`/`rejected`/`blocked`/`verifying` (start or retry a build→verify cycle),
+  verify for `built`, ship for `verified`/`reviewed`. Only a **ship the engine refused** (leaves
+  the slice `verified`/`reviewed` after a ship) or a **truly unexpected status** is `stuck` — a
+  no-progress stop. A failed build or verify is **not** `stuck`; it's a failed try that retries
+  (see the cap below).
+- **A try is a full `build → verify` cycle; cap tries, per run.** Count a try at the **build**
+  that starts each cycle, so `maxTries` (default 2) bounds total build→verify cycles — not just
+  verify rejections. Every failed cycle (verify `rejected`, build `blocked`, `verifying` with no
+  verdict, or an agent exception) loops the slice back to a fresh build and spends one try; once
+  the budget is gone, **stop driving that slice** and report it `capped`. Do not auto-flip it to
+  `blocked` — leaving it where it is and reporting it is enough; a re-run gets a fresh budget.
+- **A `blocked` build is retried, but a slice blocked at start is left for a human.** During a
+  run, a build that goes `blocked` is a failed try: the pipeline normalizes it (`blocked` →
+  `in_progress`) and rebuilds with a fresh builder, up to `maxTries` — a genuinely unbuildable
+  slice therefore burns its full budget, then `capped`, then surfaces. A slice that was **already
+  `blocked` before the run** (a human's deliberate park) is *not* auto-retried: it's dropped from
+  scheduling and reported as `blockedAtStart`. Either way, any slice a dependent needs that can't
+  ship (`capped`/`stuck`/blocked-at-start/absent) stops that dependent, which is reported `stuck`;
+  **independent slices still finish**, and everything left is surfaced for a human.
 - **Only `kuru.py` mutates state** — and only via the `/kuru:*` commands the agents run. Never
   have an agent hand-edit `ledger.json` / `gate-results.json`. A refused transition is a real
   signal.
@@ -184,7 +197,7 @@ STOP and name the command to run:
 ## Reference script
 
 Author a script in this shape, parameterized to the current board. Pass options through the
-`Workflow` tool's `args` (e.g. `{ maxRejectRetries: 2, slices: ["SL-0001", "SL-0002"] }`; omit
+`Workflow` tool's `args` (e.g. `{ maxTries: 2, slices: ["SL-0001", "SL-0002"] }`; omit
 `slices` for the whole board). Keep the structure; adapt prompts/labels to the slices you're
 driving.
 
@@ -198,7 +211,7 @@ export const meta = {
   ],
 }
 
-const MAX_RETRIES = (args && args.maxRejectRetries) || 2
+const MAX_TRIES = (args && args.maxTries) || 2   // build->verify tries per slice before capping
 // Scope: args.slices is an array of ids — absent/empty = whole board. The target-keyed
 // concurrency rule applies either way: named slices on different targets parallelize, named
 // slices on the same target serialize. Case-insensitive.
@@ -263,13 +276,20 @@ blockedIds, and draftIds. Report exactly what the board shows; do NOT start any 
   { label: 'plan', phase: 'Plan', schema: PLAN }
 )
 
+// Routing for the NON-build stages. Build states (ready/in_progress/rejected/blocked/verifying)
+// are handled by NEEDS_BUILD in drivePipeline — a `verifying` (no verdict) is a failed try that
+// rebuilds, not a re-verify — so they are intentionally absent here.
 const ACTION = {
-  ready: 'build', in_progress: 'build', rejected: 'build',
-  built: 'verify', verifying: 'verify',
+  built: 'verify',
   verified: 'ship', reviewed: 'ship',
 }
 const done = new Set(plan.doneIds)
-let slices = SCOPE ? plan.slices.filter((s) => SCOPE.has(s.id)) : plan.slices
+// Drive slices that aren't done/draft. A slice that was ALREADY `blocked` before this run is a
+// human's deliberate park — leave it (reported as blockedAtStart), don't auto-retry it. Only a
+// build that goes `blocked` DURING this run is retried (see drivePipeline). status 'blocked'
+// here means blocked-at-start.
+let slices = (SCOPE ? plan.slices.filter((s) => SCOPE.has(s.id)) : plan.slices)
+  .filter((s) => s.status !== 'blocked')
 const byId = Object.fromEntries(slices.map((s) => [s.id, s]))
 const targetOf = (s) => (s.target || 'default')
 
@@ -286,13 +306,12 @@ const requestedUnavailable = SCOPE
 
 // 2. Mutable per-slice run state (the script tracks status from each agent's reported result).
 const status = {}            // id -> current status
-const rejects = {}           // id -> per-run reject tally
 const repairs = {}           // id -> per-run contract-repair tally
 const checked = new Set()    // passed the pre-build contract check this run (CONTRACT OK)
-const blocked = new Set()    // hit blocked this run
-const capped = new Set()     // exhausted the reject OR contract-repair budget
-const stuck = new Set()      // a stage made no forward progress (e.g. verdict not recorded)
-for (const s of slices) { status[s.id] = s.status; rejects[s.id] = 0; repairs[s.id] = 0 }
+const blocked = new Set()    // could not be made buildable to retry (reset itself failed)
+const capped = new Set()     // exhausted the build->verify try budget OR the contract-repair budget
+const stuck = new Set()      // a ship the engine refused, or a truly unexpected status
+for (const s of slices) { status[s.id] = s.status; repairs[s.id] = 0 }
 
 const isLive = (s) => !done.has(s.id) && !blocked.has(s.id) && !capped.has(s.id) && !stuck.has(s.id)
 const depsDone = (s) => (s.dependsOn || []).every((d) => done.has(d))
@@ -304,51 +323,73 @@ const depDead = (s) => (s.dependsOn || []).some(
 const prompt = {
   check: (id) => `Run \`/kuru:check-contract ${id}\` — a fresh contract critic judges whether ${id}'s FROZEN contract is satisfiable (something builds each AC — this slice or an earlier done slice) and verifiable in this env. It is ADVISORY: it changes NO status and edits NO files but \`.kuru/slices/${id}/contract-review.md\`. After it returns, read that report and return { id, verdict: "ok" if it says CONTRACT OK else "flagged", note: the essence of the flags }.`,
   repair: (id) => `${id}'s contract was FLAGGED as un-satisfiable/un-verifiable. Run \`kuru set-status ${id} draft\`, then dispatch a fresh kuru-planner to rewrite contract.yml/slice.md from the flags in \`.kuru/slices/${id}/contract-review.md\` so every acceptance criterion is satisfiable and verifiable in this environment (do NOT drop scope to dodge a flag — fix the wording or the slice boundary). Then run \`kuru set-status ${id} ready\`. Finally run \`kuru show ${id}\` and report the status the LEDGER shows.`,
-  build: (id) => `Run \`/kuru:build ${id}\` and let it finish (it dispatches the builder and runs the gates). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
+  build: (id) => `First run \`kuru show ${id}\`. If it shows \`blocked\` (a previous build this run gave up) run \`kuru set-status ${id} in_progress --by builder --note "retry after failed build"\`; if it shows \`verifying\` (a previous verify recorded no verdict) run \`kuru set-status ${id} rejected --by verifier --note "no verdict — retrying build->verify"\`; otherwise leave the status alone. Then run \`/kuru:build ${id}\` and let it finish (it dispatches a FRESH builder and runs the gates). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
   verify: (id) => `Run \`/kuru:verify ${id}\` and let it finish (a fresh, INDEPENDENT verifier re-runs the gates and checks the contract). The verdict is only real once recorded: the verifier MUST end by running \`kuru set-status ${id} verified|rejected --by verifier\` — a "PASS" only in prose or in verification.md is NOT a verdict and leaves the slice in \`verifying\`. After it returns, run \`kuru show ${id}\` and report the status the LEDGER actually shows (verified / rejected / verifying / blocked) — never a status inferred from narration.`,
   ship: (id) => `Run \`/kuru:ship ${id} --no-commit\` — flip the slice to done WITHOUT committing (the launcher commits after the run). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
 }
 
-// Drive ONE slice through its build -> verify -> ship pipeline, looping rejects up to the cap.
-// Every agent shares the one tree (NO worktrees). The scheduler holds this slice's target mutex
-// for the whole pipeline, so no same-target build is in flight to contaminate this verify.
+// Statuses that mean "this slice needs a (re)build" — the start of a build->verify TRY. `ready`
+// is the first try; `in_progress`/`rejected`/`blocked`/`verifying` are a failed prior try looping
+// back (the build prompt self-normalizes blocked->in_progress and verifying->rejected first).
+const NEEDS_BUILD = new Set(['ready', 'in_progress', 'rejected', 'blocked', 'verifying'])
+
+// Drive ONE slice through its build -> verify -> ship pipeline. A TRY is one full build->verify
+// cycle; it is counted at the build that starts it, so `MAX_TRIES` bounds total build->verify
+// cycles. ANY failed cycle — a build that goes `blocked`, a verify that `rejected`s, a verify that
+// records no verdict (`verifying`), or an agent that throws — loops back to a fresh build and
+// consumes one try; the slice is `capped` only once the try budget is spent. Every agent shares
+// the one tree (NO worktrees). The scheduler holds this slice's target mutex for the whole
+// pipeline, so no same-target build is in flight to contaminate this verify.
 const drivePipeline = async (s) => {
+  let tries = 0
   while (true) {
-    const action = ACTION[status[s.id]]
-    if (!action) { stuck.add(s.id); return }                 // unexpected status -> stop, report
-    // Pre-build contract check (advisory) — before the FIRST build of this slice this run.
-    // Skip on 'rejected' (its contract already passed; only the build failed). A FLAGGED
-    // contract is repaired by the planner (draft->ready) and re-checked, capped by MAX_RETRIES.
-    if (action === 'build' && (status[s.id] === 'ready' || status[s.id] === 'in_progress') && !checked.has(s.id)) {
-      while (true) {
-        let cr
-        try { cr = await agent(prompt.check(s.id), { label: `check:${s.id}`, phase: s.id, schema: CHECK }) }
-        catch { blocked.add(s.id); return }
-        if (!cr || cr.verdict === 'ok') { checked.add(s.id); break }   // safe to build
-        if (++repairs[s.id] > MAX_RETRIES) { capped.add(s.id); return } // contract won't converge -> stop
-        let rr
-        try { rr = await agent(prompt.repair(s.id), { label: `repair:${s.id}`, phase: s.id, schema: RESULT }) }
-        catch { blocked.add(s.id); return }
-        const rs = rr && rr.status
-        if (!rs || rs === 'blocked' || rs === 'error') { blocked.add(s.id); return }
-        status[s.id] = rs                                             // expect 'ready' -> re-check
+    const st = status[s.id]
+    if (NEEDS_BUILD.has(st)) {
+      // Pre-build contract check (advisory) — before the FIRST build of this slice this run, and
+      // only when entering clean (ready/in_progress, not a retry). A FLAGGED contract is repaired
+      // by the planner (draft->ready) and re-checked, capped by MAX_TRIES.
+      if ((st === 'ready' || st === 'in_progress') && !checked.has(s.id)) {
+        let flagged = false
+        while (true) {
+          let cr
+          try { cr = await agent(prompt.check(s.id), { label: `check:${s.id}`, phase: s.id, schema: CHECK }) }
+          catch { capped.add(s.id); return }
+          if (!cr || cr.verdict === 'ok') { checked.add(s.id); break }   // safe to build
+          if (++repairs[s.id] > MAX_TRIES) { capped.add(s.id); return }   // contract won't converge -> stop
+          let rr
+          try { rr = await agent(prompt.repair(s.id), { label: `repair:${s.id}`, phase: s.id, schema: RESULT }) }
+          catch { capped.add(s.id); return }
+          const rs = rr && rr.status
+          if (!rs || rs === 'blocked') { blocked.add(s.id); return }      // couldn't reach a buildable state
+          status[s.id] = rs; flagged = true                              // expect 'ready' -> re-check
+        }
+        if (flagged) continue                                            // re-evaluate after repair
       }
+      // Start a build->verify try (the build prompt normalizes blocked/verifying first). Spend
+      // one try; if the budget is already gone, stop and surface the slice.
+      if (tries >= MAX_TRIES) { capped.add(s.id); return }
+      tries++
+      let r
+      try { r = await agent(prompt.build(s.id), { label: `build:${s.id}`, phase: s.id, schema: RESULT }) }
+      catch { status[s.id] = 'blocked'; continue }                       // failed try -> retry (capped by tries)
+      const ns = r && r.status
+      status[s.id] = ns || 'blocked'                                     // no read-back -> failed try -> retry
+      if (ns === 'done') { done.add(s.id); return }                      // (not expected from build, but safe)
+      continue                                                          // built -> verify next; else retry
     }
+    // Not a build state -> verify or ship.
+    const action = ACTION[st]
+    if (!action) { stuck.add(s.id); return }                            // truly unexpected status -> stop
     let r
-    try {
-      r = await agent(prompt[action](s.id), { label: `${action}:${s.id}`, phase: s.id, schema: RESULT })
-    } catch { blocked.add(s.id); return }
+    try { r = await agent(prompt[action](s.id), { label: `${action}:${s.id}`, phase: s.id, schema: RESULT }) }
+    catch { status[s.id] = 'blocked'; continue }                        // agent threw -> failed try -> rebuild
     const ns = r && r.status
-    if (!ns || ns === 'error') { blocked.add(s.id); return }
-    status[s.id] = ns
-    if (ns === 'blocked') { blocked.add(s.id); return }
+    status[s.id] = ns || 'blocked'                                      // no read-back -> failed try -> rebuild
     if (ns === 'done') { done.add(s.id); return }
-    if (ns === 'rejected') {                                 // verify sent it back
-      if (++rejects[s.id] >= MAX_RETRIES) { capped.add(s.id); return }
-      continue                                               // ACTION['rejected'] === 'build' -> rebuild
-    }
-    if (ACTION[ns] === action) { stuck.add(s.id); return }   // stage didn't advance (e.g. verdict not recorded) -> stop
-    // advanced to the next stage (ready->built, built->verified, ...) -> loop
+    // A ship the engine refused leaves the slice verified/reviewed with no progress -> stop.
+    if (action === 'ship' && (ns === 'verified' || ns === 'reviewed')) { stuck.add(s.id); return }
+    // else loop: verify->verified advances to ship; verify->rejected/verifying/blocked routes back
+    // through NEEDS_BUILD above as the next try.
   }
 }
 
@@ -404,7 +445,9 @@ Parse up to two tokens from `$ARGUMENTS`, in any order, and pass them as the wor
   target-keyed concurrency applies: named slices on **different** gate targets run in parallel,
   named slices on the **same** target serialize. A one-element list is the degenerate
   single-slice case. Omit the scope to drive the whole board.
-- a bare **integer** → `args.maxRejectRetries` (default 2): per-run rejection cap.
+- a bare **integer** → `args.maxTries` (default 2): per-run cap on **build→verify tries** (one
+  try = one full build→verify cycle; any failed cycle — build blocked, verify rejected, or no
+  verdict — consumes a try and retries with a fresh builder, capping when the budget is spent).
 
 In scoped mode you do **not** have to assert the named slices touch disjoint files — the script
 serializes same-target slices for you and only parallelizes across targets (which are disjoint
@@ -412,5 +455,5 @@ subtrees by definition). The one thing you must ensure: a dependency of a named 
 itself named must already be `done`, or that slice can't ship — the script reports it
 (`a dependency cannot ship in this run`) rather than silently pulling it in.
 
-Retries are **per run**: start every slice's tally at 0 each launch; never read the lifetime
+Tries are **per run**: every slice's try tally starts at 0 each launch; never read the lifetime
 `rejections` from `show`. Re-launching resets the budget.

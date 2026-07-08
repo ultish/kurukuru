@@ -592,7 +592,7 @@ harness = r'''
 const parallel = async (thunks) =>
   Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
 function makeAgent(scn) {
-  const calls = [], vcount = {}, ccount = {}
+  const calls = [], vcount = {}, ccount = {}, bcount = {}
   const agent = async (prompt) => {
     if (prompt.includes('/kuru:status')) return scn.plan
     // Pre-build contract critic (advisory): returns a verdict, never a status. A slice with
@@ -616,7 +616,15 @@ function makeAgent(scn) {
     const cmd = m[1], id = m[2]
     calls.push(cmd + ':' + id)
     const sc = (scn.scripts && scn.scripts[id]) || {}
-    if (cmd === 'build') return { id, status: sc.buildBlocked ? 'blocked' : 'built' }
+    if (cmd === 'build') {
+      bcount[id] = (bcount[id] || 0) + 1
+      // buildBlocked: every build blocks (models an unbuildable slice — retried then capped).
+      // buildBlockTimes:n: the first n builds block, then it builds (a fresh-builder retry
+      // recovers within the try budget).
+      if (sc.buildBlocked) return { id, status: 'blocked' }
+      if (sc.buildBlockTimes && bcount[id] <= sc.buildBlockTimes) return { id, status: 'blocked' }
+      return { id, status: 'built' }
+    }
     if (cmd === 'verify') {
       vcount[id] = (vcount[id] || 0) + 1
       if (sc.verifyBlocked) return { id, status: 'blocked' }
@@ -661,14 +669,14 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
   { // C: one verify-reject under cap(2) -> retries and ships; build runs twice
     const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
       scripts: { 'SL-A': { rejectTimes: 1 } } })
-    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    const o = await run({ maxTries: 2 }, agent, parallel)
     eq('C: ships after a retry', o.shipped, ['SL-A'])
     eq('C: rebuilt once (build ran twice)', calls.filter((c) => c === 'build:SL-A').length, 2)
   }
   { // D: verify always rejects -> capped, never ships
     const { agent } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
       scripts: { 'SL-A': { alwaysReject: true } } })
-    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    const o = await run({ maxTries: 2 }, agent, parallel)
     eq('D: exhausted retries -> capped', o.capped, ['SL-A'])
     eq('D: capped slice did not ship', o.shipped, [])
   }
@@ -681,15 +689,28 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
        o.stuck, [{ id: 'SL-B', reason: 'a dependency cannot ship in this run' }])
     eq('E: nothing shipped', o.shipped, [])
   }
-  { // F: A build->blocked stops its dependent B
-    const { agent } = makeAgent({ plan: plan([
+  { // F: a build that keeps blocking is RETRIED up to maxTries (a try = one build->verify
+    //    cycle, counted at the build), then capped — NOT stopped after the first block. Its
+    //    dependent B then can't ship and is stuck.
+    const { agent, calls } = makeAgent({ plan: plan([
       { id: 'SL-A', status: 'ready', dependsOn: [] },
       { id: 'SL-B', status: 'ready', dependsOn: ['SL-A'] }]),
       scripts: { 'SL-A': { buildBlocked: true } } })
-    const o = await run({}, agent, parallel)
-    eq('F: blocked slice reported blocked', o.stuck.find((x) => x.id === 'SL-A').reason, 'blocked')
-    eq('F: dependent of a blocked slice is stuck',
+    const o = await run({ maxTries: 2 }, agent, parallel)
+    eq('F: an always-blocking build is capped (retried, not stuck)', o.capped, ['SL-A'])
+    eq('F: the blocked build was retried up to maxTries (build ran twice)',
+       calls.filter((c) => c === 'build:SL-A').length, 2)
+    eq('F: dependent of a capped slice is stuck',
        o.stuck.find((x) => x.id === 'SL-B').reason, 'a dependency cannot ship in this run')
+  }
+  { // F2: a build that blocks once then succeeds still ships — a fresh-builder retry recovers
+    //    within the try budget (the fix: build failures consume a try and retry, not a hard stop).
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { buildBlockTimes: 1 } } })
+    const o = await run({ maxTries: 3 }, agent, parallel)
+    eq('F2: build-block-then-recover ships', o.shipped, ['SL-A'])
+    eq('F2: built twice (one blocked try + one good try)',
+       calls.filter((c) => c === 'build:SL-A').length, 2)
   }
   { // G: pre-existing states - 'built' enters at verify, 'verified' enters at ship
     const { agent, calls } = makeAgent({ plan: plan([
@@ -738,7 +759,7 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
   { // L: a flagged contract is repaired then builds — check, repair, check(ok), build, ship.
     const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
       scripts: { 'SL-A': { contractFlagged: 1 } } })
-    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    const o = await run({ maxTries: 2 }, agent, parallel)
     eq('L: flagged-then-fixed contract ships', o.shipped, ['SL-A'])
     eq('L: repaired once, never built before the contract was OK', [
        calls.filter((c) => c === 'repair:SL-A').length,
@@ -747,7 +768,7 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
   { // M: a contract that never converges is capped — never built, never shipped.
     const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
       scripts: { 'SL-A': { contractAlwaysFlagged: true } } })
-    const o = await run({ maxRejectRetries: 2 }, agent, parallel)
+    const o = await run({ maxTries: 2 }, agent, parallel)
     eq('M: un-satisfiable contract is capped', o.capped, ['SL-A'])
     eq('M: capped contract never reached build', calls.some((c) => c === 'build:SL-A'), false)
   }

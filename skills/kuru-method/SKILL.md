@@ -83,7 +83,10 @@ lock (`.kuru/.ledger.lock`). Ship defers its commit (`--no-commit`); the launchi
 **one commit after the run** instead of one per slice — trading per-slice revert granularity for
 parallel speed. Scope it to a curated set (`/kuru:loop-workflow SL-0001,SL-0002`) or omit for the
 whole board. See the `loop-workflow` skill for the design and the reference script.
-`max-reject-retries` is **per run** (a re-run resets every slice's tally).
+`max-tries` is **per run** (a re-run resets every slice's tally): a try is one full
+`build → verify` cycle, counted at the build, so a failed *build* (→ `blocked`) is retried
+with a fresh agent up to the budget just like a verify rejection — a slice blocked before
+the run is the exception, left for a human.
 
 ## The slice state machine (enforced by kuru.py)
 

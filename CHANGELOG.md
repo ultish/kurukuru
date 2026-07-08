@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-08
+
+### Changed
+- **The loop retry budget now counts whole `build → verify` cycles, and build failures
+  are retried — renamed `max-reject-retries` → `max-tries`.** A *try* is one full
+  build→verify cycle, counted at the build that starts it, so a failed **build** (the
+  builder gives up → `blocked`) costs a try and is retried with a fresh agent up to
+  `max-tries`, exactly like a verify rejection — previously only verify rejections
+  consumed the budget and a blocked build stopped the run at one attempt (so a run often
+  didn't reach the requested number of tries). A slice **already blocked before the run**
+  is still left for a human (not auto-retried); a mid-run blocked build resets to
+  `in_progress` and rebuilds. Applies across `/kuru:loop-workflow`, `/kuru:loop`,
+  `/kuru:loop-slice`, and `runner.py` (`--max-tries`, with `--max-retries` kept as an
+  alias). The public argument is unchanged (a bare integer / the flag alias), so existing
+  invocations keep working. Docs updated in the `loop-workflow` skill + command,
+  `kuru-method`, and `README.md`; `scripts/selftest.sh` gains coverage for a blocked build
+  being retried-then-capped and for a block-then-recover slice shipping.
+
 ## [1.7.0] - 2026-07-07
 
 ### Added

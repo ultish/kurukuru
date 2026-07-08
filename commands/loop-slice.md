@@ -1,6 +1,6 @@
 ---
 description: Autonomously drive ONE named slice through build→verify→done, then stop (code review is opt-in). Like /kuru:loop but scoped to a single slice you name.
-argument-hint: "<slice-id> [max-reject-retries, default 2]"
+argument-hint: "<slice-id> [max-tries, default 2]"
 ---
 
 Use the `kuru-method` skill for context.
@@ -10,10 +10,13 @@ you name** — it ships exactly that slice and then stops, instead of clearing t
 board. Use it to step through delivery one slice per invocation while staying hands-on,
 or to push a specific slice that matters next.
 
-The slice id comes from `$ARGUMENTS` (e.g. `SL-0003`); `max-reject-retries` (also from
-`$ARGUMENTS`, default **2**) caps how many times the slice may be rejected/sent-back
-**in this run** before the loop stops and asks for a human. The budget is **per run** —
-re-running this command resets the tally to 0, so the cap governs only the current run.
+The slice id comes from `$ARGUMENTS` (e.g. `SL-0003`); `max-tries` (also from
+`$ARGUMENTS`, default **2**) caps how many **build→verify tries** the slice gets
+**in this run** before the loop stops and asks for a human. One try is one full
+`build → verify` cycle; **any** failed cycle — a verify rejection, a build that goes
+`blocked`, or a verify with no verdict — consumes a try and is retried with a **fresh**
+subagent. The budget is **per run** — re-running this command resets the tally to 0, so
+the cap governs only the current run.
 **Code review is opt-in** — a verified slice ships straight to `done`; run
 `/kuru:review <id>` by hand if this slice warrants a closer look.
 
@@ -64,7 +67,14 @@ Repeat until a stop condition fires:
    | `verify` (status `built` / `verifying`) | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify <id>`). |
    | `ship` (status `verified` / `reviewed`) | **ship it** — `set-status <id> done` (auto-commits the slice: code + `.kuru/` artifacts + ledger, as one commit), then go to **Termination**. Code review is opt-in and this loop does **not** run it. |
 
-4. After each transition, briefly note progress, then loop.
+4. After a build or verify, read `kuru show <id>`. If it left the slice **`blocked`** or
+   **`verifying`** with no recorded verdict, that's a **failed try**, not a stop: while the
+   slice is under its `max-tries` budget, reset it to buildable (`blocked` → `in_progress`,
+   `verifying` → `rejected`) and loop to rebuild with a **fresh** builder. `kuru next
+   --slice <id>` won't hand back a `blocked` slice, so do this reset yourself — otherwise a
+   failed build ends the run at one attempt. Only once the budget is spent do you leave it
+   `blocked` and stop.
+5. After each transition, briefly note progress, then loop.
 
 ### Pre-build contract check (advisory, before the first build)
 
@@ -76,7 +86,7 @@ could satisfy *before* a build→verify loop is wasted on it.
 - **CONTRACT FLAGGED** → run the **contract-repair cycle**: `set-status <id> draft` →
   dispatch a **fresh `kuru-planner`** with the critic's flags + `contract-review.md` to
   rewrite `contract.yml`/`slice.md` → `set-status <id> ready` → re-run the critic.
-  Repeat until `CONTRACT OK`, **capped by `max-reject-retries`** (repair attempts count
+  Repeat until `CONTRACT OK`, **capped by `max-tries`** (repair attempts count
   toward the same per-run budget). If it can't converge, STOP — `set-status <id> blocked
   --note "contract un-satisfiable after N repair attempts: <last flags>"`.
 
@@ -89,19 +99,26 @@ repairs, the engine records the `draft→ready` transitions.
   subagent invocation** with its own context. Never let the agent that implemented the
   slice also verify it — the independence is the whole reason this works. The engine
   refuses `verified --by builder`, but you must also not reuse the builder's context.
-- **Cap the send-back cycle, per run.** Keep a this-run rejection tally for the slice,
-  starting at 0 when the loop starts; increment it each time the slice is rejected during
-  this run. Do **not** read the slice's lifetime `rejections` from `show` — the budget is
-  per run, so a re-run gets a fresh one. When the tally reaches `max-reject-retries`,
-  STOP: `set-status <id> blocked --note "exceeded N build/verify retries this run: <last
-  failure>"` and hand to a human. Do not spin forever.
+- **A try is a full `build → verify` cycle; cap tries, per run.** Keep a this-run tally
+  for the slice, starting at 0, and count a try at the **build** that starts each cycle —
+  so the budget bounds build→verify cycles, **not just verify rejections**. Any failed
+  cycle consumes a try: a verify that **rejects**, a build that goes **blocked**, or a
+  verify with **no verdict**. Do **not** read the slice's lifetime `rejections` from
+  `show` — the budget is per run, so a re-run gets a fresh one. When the tally reaches
+  `max-tries`, STOP: `set-status <id> blocked --note "exhausted N build→verify tries this
+  run: <last failure>"` and hand to a human. Do not spin forever.
 - **Check the contract before building.** Don't dispatch a builder on a `ready` slice
   that hasn't gone `CONTRACT OK` this run. A flagged contract is repaired by a fresh
   **planner** (distinct from builder/verifier) via the `draft→ready` cycle above — never
   by the critic, the builder, or hand-editing `contract.yml`. Repair attempts count
-  toward `max-reject-retries`.
-- **`blocked` means stop, not skip.** If a builder, verifier, or the contract-repair
-  cycle sets the slice `blocked`, STOP and surface it — never route around it.
+  toward `max-tries`.
+- **A mid-run `blocked` build is a failed try; a slice blocked at start is left for a
+  human.** If a **builder or verifier** blocks the slice **during this run**, reset it
+  (`blocked` → `in_progress`) and retry with a fresh builder while under `max-tries` (step
+  4); only once the budget is spent do you leave it `blocked` and surface it. A slice
+  **already `blocked` before the run** (or the contract-repair cap's hard stop) is not
+  auto-retried — surface it. Never fabricate progress, and never `set-status` the slice
+  `built`/`verified` yourself.
 - **Never fabricate progress.** You only ever change status through `kuru.py`; you never
   hand-edit `ledger.json`/`gate-results.json`. If the engine's gate + role rules refuse a
   transition, that is a real signal, not an obstacle.
