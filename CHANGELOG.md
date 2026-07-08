@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-08
+
+### Added
+- **`/kuru:reuse-stats` slash command.** The `kuru reuse-stats` engine subcommand shipped
+  in 1.7.0 but had no `/kuru:*` wrapper, so it wasn't reachable as a slash command like its
+  sibling reporting verb `/kuru:status`. Adds a thin `commands/reuse-stats.md` that runs
+  `kuru reuse-stats` (pass `--json` for the machine-readable rollup) and presents the
+  reuse-index lookup coverage/rate — advisory, read-only. Listed in `README.md`.
+
 ## [1.8.0] - 2026-07-08
 
 ### Changed

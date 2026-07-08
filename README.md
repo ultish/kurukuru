@@ -104,6 +104,7 @@ Then, in Claude Code:
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
 /kuru:review             # OPTIONAL code review of a verified slice -> reviewed -> done
 /kuru:status             # dashboard      /kuru:next   # what to do next
+/kuru:reuse-stats        # reuse-index lookup rollup across builds (advisory)
 /kuru:bearings           # run at the start of every session
 ```
 
@@ -443,6 +444,7 @@ exposes:
   - /kuru:loop-workflow — parallel build→verify→ship over all ready slices, as a dynamic workflow
   - /kuru:next        — print and start the next actionable slice
   - /kuru:status      — delivery dashboard
+  - /kuru:reuse-stats — roll up builders' reuse-index lookups across slices (advisory)
   - /kuru:bearings    — session startup ritual (context-reset recovery)
   - runner.py         — standalone headless driver (not part of the plugin)
   - scripts/kuru.py   — deterministic state + gate engine (CLI, callable directly)
