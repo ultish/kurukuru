@@ -10,7 +10,7 @@ Run and present:
 - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`
 
 `next --all` is the dependency-aware view: it groups every slice as **actionable now**
-(each with its next action — build / verify / ship — and the `(deps: …)` it was gated
+(each with its next action — build / verify / review / ship — and the `(deps: …)` it was gated
 behind), **waiting on dependencies** (`<id> <- <unmet deps>`), **draft**, or **blocked**.
 Present those **dependency chains** — which slice is waiting on which — not just a flat
 list, so the reader (or an automated driver like `/kuru:loop-workflow`) can see what can

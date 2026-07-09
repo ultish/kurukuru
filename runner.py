@@ -7,8 +7,9 @@ This is the headless counterpart to the in-session `/kuru:loop` command. It runs
 
   1. reads state deterministically from the engine  (`kuru.py next --json`), then
   2. launches a FRESH `claude -p` session for the one step that advances it
-     (`/kuru:build` or `/kuru:verify`) — or, for a verified slice, ships it
-     straight to `done` itself (code review is opt-in: run `/kuru:review` by hand),
+     (`/kuru:build`, `/kuru:verify`, or — when this workspace has review on —
+     `/kuru:review`) — and ships a shippable slice (`verified` with review off, or
+     `reviewed`) to `done` itself,
 
 repeating until the board is clear. Each step is its own process with its own
 context, so nothing accumulates: builder and verifier are not just separate
@@ -28,10 +29,11 @@ Division of labour (deliberate):
     `blocked` when it finally gives up, and the retry-reset (`blocked`/`verifying`
     -> `in_progress`) that re-queues a failed build — never fabricated progress.
 
-Retries: a TRY is one build->verify cycle, counted at the build that starts it, so
-a failed *build* (the builder gives up -> `blocked`) counts and is retried with a
-fresh process just like a verify rejection — up to `--max-tries` per slice, per run.
-Only a slice already blocked before the run began is left for a human untouched.
+Retries: a TRY is one build->verify(->review) cycle, counted at the build that starts
+it, so a failed *build* (the builder gives up -> `blocked`), a verify rejection, OR a
+review rejection (when review is on) each counts and is retried with a fresh process —
+up to `--max-tries` per slice, per run. Only a slice already blocked before the run
+began is left for a human untouched.
 
 Preconditions: charter + spec + frozen (non-draft) slices must already exist (in
 `--slice` mode, only the named slice and its dependencies need contracts). The
@@ -230,12 +232,13 @@ class Runner:
                 return 1
 
             if action == "ship":
-                # Code review is opt-in; the default loop ships a verified (or
-                # already-reviewed) slice straight to `done` without spawning a
-                # reviewer. Run /kuru:review by hand for slices that warrant it.
+                # Ship a slice the engine says is shippable: `verified` when review is
+                # off, or `reviewed` when review is on (the engine routes verified ->
+                # review first via the `review` action, handled by the generic dispatch
+                # below). Ship inline as one `done` (auto-commits).
                 print(f"[{i}] {sid} [{status}] -> ship  ({nxt['title']})")
                 self.kuru_run("set-status", sid, "done")
-                print(f"  ✓ {sid} -> done (review skipped — opt-in)")
+                print(f"  ✓ {sid} -> done")
                 done_count += 1
                 last_key = (sid, status)
                 # single-slice mode: the next iteration re-derives the target as done and stops.
@@ -311,9 +314,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the kuru plugin directory (default: the directory holding this script). "
                         "Set this if you move runner.py out of the plugin repo.")
     p.add_argument("--max-tries", "--max-retries", dest="max_tries", type=int, default=2,
-                   help="per-slice, per-run cap on build->verify TRIES before blocking (default 2). "
-                        "One try = one full build->verify cycle; a failed build (blocked) costs a "
-                        "try and is retried just like a verify rejection. (--max-retries: alias.)")
+                   help="per-slice, per-run cap on build->verify(->review) TRIES before blocking (default 2). "
+                        "One try = one full build->verify->review cycle; a failed build (blocked), a verify "
+                        "rejection, or a review rejection each costs a try and is retried with a fresh "
+                        "process. (--max-retries: alias.)")
     p.add_argument("--max-iters", type=int, default=100,
                    help="global safety cap on loop iterations (default 100)")
     p.add_argument("--permission-mode", default="bypassPermissions",

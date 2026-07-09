@@ -6,8 +6,9 @@ Guidance for Claude Code when working in this repo.
 
 **kurukuru** — a Claude Code *plugin* that turns a coding agent into a disciplined
 delivery pipeline for production software: `charter → spec → slice → build → verify
-→ done` (with an advisory `check-contract` step between `slice` and `build`, and an
-opt-in `review` step before `done`). The core thesis: facts that gate progress live in machine-checked
+→ review → done` (with an advisory `check-contract` step between `slice` and `build`, and a
+`review` step before `done` that is **on by default** but toggleable per workspace with
+`kuru set-review`). The core thesis: facts that gate progress live in machine-checked
 files, never in agent narration. Read `README.md` for the full picture and the
 `kuru-method` skill for the methodology. `impl/BUILD_PLAN.md` is the original spec
 but is **legacy** — where it and the code disagree, the code (and BUILD_PLAN §9

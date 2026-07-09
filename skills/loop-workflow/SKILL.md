@@ -1,12 +1,14 @@
 ---
 name: loop-workflow
-description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→ship using a Claude Code dynamic workflow. Explains how to author, present, and launch the workflow script, the PER-SLICE pipelines keyed by gate target (same target serialized, different targets parallel — the no-worktrees lesson), how slices route on the state machine (including retry/back-to-build edges), the deferred single commit, and the guardrails.
+description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→review→ship using a Claude Code dynamic workflow. Explains how to author, present, and launch the workflow script, the PER-SLICE pipelines keyed by gate target (same target serialized, different targets parallel — the no-worktrees lesson), how slices route on the state machine (including the review stage when the workspace has review on, and retry/back-to-build edges), the deferred single commit, and the guardrails.
 ---
 
 # Driving the board with a dynamic workflow
 
 `/kuru:loop-workflow` clears the board the same way `/kuru:loop` does — the mechanical
-`build → verify → ship` cycle — but it drives each slice as its **own pipeline** and runs
+`build → verify → review → ship` cycle (review runs when the workspace has it on — the `kuru
+init` default; a review rejection rebuilds like a verify rejection) — but it drives each slice
+as its **own pipeline** and runs
 slices **on different gate targets in parallel** (same-target slices serialize), as a **Claude
 Code dynamic workflow** rather than by orchestrating subagents inside this conversation.
 
@@ -53,6 +55,7 @@ only holds the loop.
    - read the board → an agent runs **`/kuru:status`** and returns a structured snapshot;
    - build → an agent runs **`/kuru:build <id>`**;
    - verify → an agent runs **`/kuru:verify <id>`**;
+   - review *(when review is on)* → an agent runs **`/kuru:review <id>`**;
    - ship → an agent runs **`/kuru:ship <id> --no-commit`** (see "The deferred commit").
    This keeps the rule that **only `kuru.py` mutates the ledger** intact — the commands wrap it
    — without the script needing a path to `kuru.py`.
@@ -83,8 +86,9 @@ retry-cap, blocked), so the ledger and git reconverge no matter how the run ends
 
 ## The loop is per-slice pipelines, serialized per gate target
 
-Each slice is driven through its **own** `build → verify → ship` pipeline — a fresh `agent()`
-per stage. The slices do **not** march through global phases. What decides parallelism is the
+Each slice is driven through its **own** `build → verify → review → ship` pipeline (review runs
+when the workspace has it on) — a fresh `agent()` per stage. The slices do **not** march through
+global phases. What decides parallelism is the
 **gate target** (the `config.json` target a slice builds under; `"default"` for a single-target
 repo):
 
@@ -94,8 +98,8 @@ repo):
   once would (a) clobber each other's edits during `build`, and (b) let one slice's in-flight
   build contaminate the other's `verify`, which re-runs the gates and drives the running app
   against that target's tree. Serializing the whole pipeline — not just barriering one phase —
-  removes both: while slice A is anywhere in build→verify→ship on target T, no other slice on T
-  starts.
+  removes both: while slice A is anywhere in build→verify→review→ship on target T, no other slice
+  on T starts.
 - **Different target → parallel.** Targets are disjoint subtrees with their own `dir` and gates,
   so their pipelines can't contaminate each other. They run concurrently, bounded only by the
   runtime's agent-concurrency cap.
@@ -113,17 +117,21 @@ is live, has its deps `done`, and whose target is currently free; then await the
 finish (which frees its target and may unlock dependents) and repeat, until nothing is running and
 nothing new can start.
 
-**A try is one `build → verify` cycle, and the budget bounds cycles — not just verify
-rejections.** `maxTries` (default 2) is how many build→verify cycles a slice gets in this run. A
-try is counted at the **build** that starts it, so **any** failed cycle consumes one and loops the
-slice back to a fresh build: a verify that `rejected`s, a build that goes `blocked` (the builder
-gave up / gates stayed red), a verify that recorded **no verdict** (`verifying`), or an agent that
-threw. The build stage normalizes a retried slice first (`blocked` → `in_progress`, `verifying` →
-`rejected`) so the next build can run. The slice is `capped` only once the try budget is spent —
-so a slice that keeps failing on the **build** side now gets its full `maxTries` attempts (each a
-fresh-context builder) instead of stopping at the first block. State routing: `ready` /
-`in_progress` / `rejected` / `blocked` / `verifying` → build (start/retry a cycle), `built` →
-verify, `verified` / `reviewed` → ship.
+**A try is one `build → verify → review` cycle, and the budget bounds cycles — not just verify
+rejections.** `maxTries` (default 2) is how many build→verify(→review) cycles a slice gets in this
+run. A try is counted at the **build** that starts it, so **any** failed cycle consumes one and
+loops the slice back to a fresh build: a verify that `rejected`s, a **review** that `rejected`s
+(when review is on), a build that goes `blocked` (the builder gave up / gates stayed red), a verify
+that recorded **no verdict** (`verifying`), or an agent that threw. The build stage normalizes a
+retried slice first (`blocked` → `in_progress`, `verifying` → `rejected`) so the next build can run.
+The slice is `capped` only once the try budget is spent — so a slice that keeps failing on the
+**build** side now gets its full `maxTries` attempts (each a fresh-context builder) instead of
+stopping at the first block. State routing: `ready` / `in_progress` / `rejected` / `blocked` /
+`verifying` → build (start/retry a cycle), `built` → verify, `verified` → **review** (when review is
+on; else ship), `reviewed` → ship. **Review is a stage of the same try** — a review rejection
+(`verified` → `rejected`) rebuilds like a verify rejection and consumes the next try; it is NOT a
+separate budget. When review is **off**, the cycle is just `build → verify` and a verified slice
+ships directly.
 
 **Pre-build contract check (advisory).** Before a slice's **first build this run** (status
 `ready`/`in_progress`, not `rejected`), its pipeline runs the **contract critic**
@@ -154,15 +162,17 @@ under the same target mutex.
   recording the verdict the agent's load-bearing output and makes it report the status the ledger
   shows.
 - **Route every slice by its *current* status** — build for
-  `ready`/`in_progress`/`rejected`/`blocked`/`verifying` (start or retry a build→verify cycle),
-  verify for `built`, ship for `verified`/`reviewed`. Only a **ship the engine refused** (leaves
-  the slice `verified`/`reviewed` after a ship) or a **truly unexpected status** is `stuck` — a
-  no-progress stop. A failed build or verify is **not** `stuck`; it's a failed try that retries
-  (see the cap below).
-- **A try is a full `build → verify` cycle; cap tries, per run.** Count a try at the **build**
-  that starts each cycle, so `maxTries` (default 2) bounds total build→verify cycles — not just
-  verify rejections. Every failed cycle (verify `rejected`, build `blocked`, `verifying` with no
-  verdict, or an agent exception) loops the slice back to a fresh build and spends one try; once
+  `ready`/`in_progress`/`rejected`/`blocked`/`verifying` (start or retry a build→verify→review
+  cycle), verify for `built`, **review for `verified`** (when review is on; else ship), ship for
+  `reviewed`. Only a **ship the engine refused** (leaves the slice `verified`/`reviewed` after a
+  ship), a **review that recorded no verdict** (leaves `verified`), or a **truly unexpected status**
+  is `stuck` — a no-progress stop. A failed build, verify, or review is **not** `stuck`; it's a
+  failed try that retries (see the cap below).
+- **A try is a full `build → verify → review` cycle; cap tries, per run.** Count a try at the
+  **build** that starts each cycle, so `maxTries` (default 2) bounds total build→verify(→review)
+  cycles — not just verify rejections. Every failed cycle (verify `rejected`, **review `rejected`**,
+  build `blocked`, `verifying` with no verdict, or an agent exception) loops the slice back to a
+  fresh build and spends one try; once
   the budget is gone, **stop driving that slice** and report it `capped`. Do not auto-flip it to
   `blocked` — leaving it where it is and reporting it is enough; a re-run gets a fresh budget.
 - **A `blocked` build is retried, but a slice blocked at start is left for a human.** During a
@@ -197,27 +207,36 @@ STOP and name the command to run:
 ## Reference script
 
 Author a script in this shape, parameterized to the current board. Pass options through the
-`Workflow` tool's `args` (e.g. `{ maxTries: 2, slices: ["SL-0001", "SL-0002"] }`; omit
-`slices` for the whole board). Keep the structure; adapt prompts/labels to the slices you're
-driving.
+`Workflow` tool's `args` (e.g. `{ maxTries: 2, slices: ["SL-0001", "SL-0002"], review: true }`;
+omit `slices` for the whole board). **Set `args.review` from the workspace policy** — read it
+from `kuru next --all --json` (`.review`) during the preconditions and pass it through, so the
+run honors this workspace's `kuru set-review` setting (default on). Keep the structure; adapt
+prompts/labels to the slices you're driving.
 
 ```javascript
 export const meta = {
   name: 'kuru-loop-workflow',
-  description: 'Drive ready Kurukuru slices through PER-SLICE build -> verify -> ship pipelines, dependency-ordered. Slices on the SAME gate target serialize (one shared tree, no worktrees); slices on DIFFERENT targets run in parallel. Ship defers the commit (the launcher commits once after the run).',
+  description: 'Drive ready Kurukuru slices through PER-SLICE build -> verify -> review -> ship pipelines (review when the workspace has it on), dependency-ordered. Slices on the SAME gate target serialize (one shared tree, no worktrees); slices on DIFFERENT targets run in parallel. Ship defers the commit (the launcher commits once after the run).',
   phases: [
     { title: 'Plan', detail: 'read the board: each slice status, depends_on, and gate target' },
-    { title: 'Pipelines', detail: 'one build->verify->ship pipeline per slice; same target serialized, different targets parallel' },
+    { title: 'Pipelines', detail: 'one build->verify->review->ship pipeline per slice (review when on); same target serialized, different targets parallel' },
   ],
 }
 
-const MAX_TRIES = (args && args.maxTries) || 2   // build->verify tries per slice before capping
+const MAX_TRIES = (args && args.maxTries) || 2   // build->verify->review tries per slice before capping
 // Scope: args.slices is an array of ids — absent/empty = whole board. The target-keyed
 // concurrency rule applies either way: named slices on different targets parallelize, named
 // slices on the same target serialize. Case-insensitive.
 const SCOPE = args && args.slices && args.slices.length
   ? new Set(args.slices.map((x) => String(x).toUpperCase()))
   : null
+
+// Code review policy for THIS workspace (kuru's meta.review). ON (the `kuru init` default) ->
+// a verified slice must pass /kuru:review before it can ship, and a review rejection loops it
+// back to build (the next try). OFF -> a verified slice ships straight to done. The launcher
+// reads the flag from `kuru next --all --json` (.review) and passes it as args.review; default
+// ON if unspecified.
+const REVIEW = args && args.review !== undefined ? !!args.review : true
 
 // **CRITICAL**: Agents do NOT use isolation: 'worktree'. All agents run in the same tree to
 // read/write the shared ledger.json. The launcher commits once after the run on the main tree.
@@ -278,10 +297,11 @@ blockedIds, and draftIds. Report exactly what the board shows; do NOT start any 
 
 // Routing for the NON-build stages. Build states (ready/in_progress/rejected/blocked/verifying)
 // are handled by NEEDS_BUILD in drivePipeline — a `verifying` (no verdict) is a failed try that
-// rebuilds, not a re-verify — so they are intentionally absent here.
+// rebuilds, not a re-verify — so they are intentionally absent here. With REVIEW on, a verified
+// slice routes to `review` first (a rejection there rebuilds = next try); reviewed always ships.
 const ACTION = {
   built: 'verify',
-  verified: 'ship', reviewed: 'ship',
+  verified: REVIEW ? 'review' : 'ship', reviewed: 'ship',
 }
 const done = new Set(plan.doneIds)
 // Drive slices that aren't done/draft. A slice that was ALREADY `blocked` before this run is a
@@ -325,6 +345,7 @@ const prompt = {
   repair: (id) => `${id}'s contract was FLAGGED as un-satisfiable/un-verifiable. Run \`kuru set-status ${id} draft\`, then dispatch a fresh kuru-planner to rewrite contract.yml/slice.md from the flags in \`.kuru/slices/${id}/contract-review.md\` so every acceptance criterion is satisfiable and verifiable in this environment (do NOT drop scope to dodge a flag — fix the wording or the slice boundary). Then run \`kuru set-status ${id} ready\`. Finally run \`kuru show ${id}\` and report the status the LEDGER shows.`,
   build: (id) => `First run \`kuru show ${id}\`. If it shows \`blocked\` (a previous build this run gave up) run \`kuru set-status ${id} in_progress --by builder --note "retry after failed build"\`; if it shows \`verifying\` (a previous verify recorded no verdict) run \`kuru set-status ${id} rejected --by verifier --note "no verdict — retrying build->verify"\`; otherwise leave the status alone. Then run \`/kuru:build ${id}\` and let it finish (it dispatches a FRESH builder and runs the gates). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
   verify: (id) => `Run \`/kuru:verify ${id}\` and let it finish (a fresh, INDEPENDENT verifier re-runs the gates and checks the contract). The verdict is only real once recorded: the verifier MUST end by running \`kuru set-status ${id} verified|rejected --by verifier\` — a "PASS" only in prose or in verification.md is NOT a verdict and leaves the slice in \`verifying\`. After it returns, run \`kuru show ${id}\` and report the status the LEDGER actually shows (verified / rejected / verifying / blocked) — never a status inferred from narration.`,
+  review: (id) => `Run \`/kuru:review ${id}\` — a fresh reviewer code-reviews ${id}'s diff (the quality axis; verify already settled the contract). The verdict is only real once recorded: the reviewer MUST end by running \`kuru set-status ${id} reviewed --by reviewer\` if it's clean, or \`kuru set-status ${id} rejected --by reviewer --note "<what to fix>"\` if it finds real problems (a rejection routes the slice back to build — the next try). After it returns, run \`kuru show ${id}\` and report the status the LEDGER shows (reviewed / rejected / verified) — never inferred from narration.`,
   ship: (id) => `Run \`/kuru:ship ${id} --no-commit\` — flip the slice to done WITHOUT committing (the launcher commits after the run). Then run \`kuru show ${id}\` and report the status the LEDGER shows.`,
 }
 
@@ -333,9 +354,10 @@ const prompt = {
 // back (the build prompt self-normalizes blocked->in_progress and verifying->rejected first).
 const NEEDS_BUILD = new Set(['ready', 'in_progress', 'rejected', 'blocked', 'verifying'])
 
-// Drive ONE slice through its build -> verify -> ship pipeline. A TRY is one full build->verify
-// cycle; it is counted at the build that starts it, so `MAX_TRIES` bounds total build->verify
-// cycles. ANY failed cycle — a build that goes `blocked`, a verify that `rejected`s, a verify that
+// Drive ONE slice through its build -> verify -> review -> ship pipeline (review only when REVIEW
+// is on; else build -> verify -> ship). A TRY is one full build->verify->review cycle; it is
+// counted at the build that starts it, so `MAX_TRIES` bounds total cycles. ANY failed cycle — a
+// build that goes `blocked`, a verify that `rejected`s, a REVIEW that `rejected`s, a verify that
 // records no verdict (`verifying`), or an agent that throws — loops back to a fresh build and
 // consumes one try; the slice is `capped` only once the try budget is spent. Every agent shares
 // the one tree (NO worktrees). The scheduler holds this slice's target mutex for the whole
@@ -388,8 +410,12 @@ const drivePipeline = async (s) => {
     if (ns === 'done') { done.add(s.id); return }
     // A ship the engine refused leaves the slice verified/reviewed with no progress -> stop.
     if (action === 'ship' && (ns === 'verified' || ns === 'reviewed')) { stuck.add(s.id); return }
-    // else loop: verify->verified advances to ship; verify->rejected/verifying/blocked routes back
-    // through NEEDS_BUILD above as the next try.
+    // A review that recorded no verdict leaves the slice `verified` (a pass would be `reviewed`,
+    // a rejection `rejected`) -> no progress -> stop (else ACTION[verified] re-runs review forever).
+    if (action === 'review' && ns === 'verified') { stuck.add(s.id); return }
+    // else loop: verify->verified advances to review (or ship if REVIEW off); review->reviewed
+    // advances to ship; review->rejected and verify->rejected/verifying/blocked route back through
+    // NEEDS_BUILD above as the next try.
   }
 }
 
@@ -445,9 +471,10 @@ Parse up to two tokens from `$ARGUMENTS`, in any order, and pass them as the wor
   target-keyed concurrency applies: named slices on **different** gate targets run in parallel,
   named slices on the **same** target serialize. A one-element list is the degenerate
   single-slice case. Omit the scope to drive the whole board.
-- a bare **integer** → `args.maxTries` (default 2): per-run cap on **build→verify tries** (one
-  try = one full build→verify cycle; any failed cycle — build blocked, verify rejected, or no
-  verdict — consumes a try and retries with a fresh builder, capping when the budget is spent).
+- a bare **integer** → `args.maxTries` (default 2): per-run cap on **build→verify→review tries**
+  (one try = one full build→verify→review cycle, or build→verify when review is off; any failed
+  cycle — build blocked, verify rejected, **review rejected**, or no verdict — consumes a try and
+  retries with a fresh builder, capping when the budget is spent).
 
 In scoped mode you do **not** have to assert the named slices touch disjoint files — the script
 serializes same-target slices for you and only parallelizes across targets (which are disjoint

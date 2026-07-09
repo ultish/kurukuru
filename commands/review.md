@@ -1,13 +1,16 @@
 ---
-description: Optionally code-review a verified slice and mark it reviewed. Review is opt-in — the loop ships verified slices without it.
+description: Code-review a verified slice and mark it reviewed (or reject it back to the builder). Review is on by default; the loop runs it on every verified slice — run this by hand for one-offs or when review is off.
 argument-hint: "[slice-id]"
 ---
 
 Use the `reviewing-a-slice` skill for methodology (and `kuru-method` for context).
 
-**Code review is opt-in.** A verified slice may ship straight to `done` (that's
-what `/kuru:loop` does); run this command by hand on the slices that warrant a
-closer look. It is not a required pipeline step.
+**Code review is on by default** (`kuru init` seeds it on), so `/kuru:loop` and
+`/kuru:loop-workflow` already route each verified slice through this step before ship.
+Run this command **by hand** when you want to review a specific slice yourself, or when
+the workspace has review **off** (`kuru set-review off` — then a verified slice ships
+straight to `done`) and this one still warrants a closer look. Toggle the policy with
+`kuru set-review on|off`.
 
 Resolve the target: `$ARGUMENTS` if given, else the first slice in status
 `verified` (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status verified`).

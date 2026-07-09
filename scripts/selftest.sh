@@ -170,16 +170,31 @@ $KURU show SL-0001 --json | python3 -c "import json,sys; sys.exit(0 if json.load
 # from rejected, next dispatches a build
 $KURU next --json | grep -q '"next_action": "build"' && ok "rejected -> next says build" || fail "rejected next wrong"
 
-echo "== opt-in review: a verified slice ships straight to done (action=ship) =="
+echo "== review policy: on by default (verified->review), set-review off -> ship straight =="
 newrepo >/dev/null
 $KURU init >/dev/null; trivial_gates; $KURU new-slice "x" >/dev/null
+# init seeds meta.review on
+python3 -c "import json,sys; sys.exit(0 if json.load(open('.kuru/ledger.json'))['meta'].get('review') is True else 1)" \
+  && ok "kuru init seeds review ON by default" || fail "init did not seed review on"
 $KURU set-status SL-0001 ready >/dev/null; $KURU set-status SL-0001 in_progress >/dev/null
 $KURU set-status SL-0001 built --by builder >/dev/null; $KURU set-status SL-0001 verifying --by verifier >/dev/null
 $KURU gate SL-0001 >/dev/null 2>&1; $KURU set-status SL-0001 verified --by verifier >/dev/null
+# review ON: next routes a verified slice to REVIEW (not ship), and reports the policy
 nx="$($KURU next --json)"
-echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
-  && ok "verified slice surfaces via next (action ship)" || fail "verified not shippable: $nx"
-expect_ok "verified->done allowed directly (review opt-in)" $KURU set-status SL-0001 done
+echo "$nx" | grep -q '"next_action": "review"' && echo "$nx" | grep -q '"review": true' \
+  && ok "review on: verified slice surfaces via next (action review)" || fail "verified action not review: $nx"
+# toggling review OFF makes a verified slice ship straight to done
+$KURU set-review off >/dev/null
+nx="$($KURU next --json)"
+echo "$nx" | grep -q '"next_action": "ship"' && echo "$nx" | grep -q '"review": false' \
+  && ok "set-review off: verified slice action becomes ship" || fail "verified action not ship after off: $nx"
+# the verified->done transition stays legal regardless of policy (policy only routes `next`)
+expect_ok "verified->done allowed directly (policy routes next, not the transition)" $KURU set-status SL-0001 done
+# --no-review at init seeds it off
+newrepo >/dev/null
+$KURU init --no-review >/dev/null
+python3 -c "import json,sys; sys.exit(0 if json.load(open('.kuru/ledger.json'))['meta'].get('review') is False else 1)" \
+  && ok "kuru init --no-review seeds review OFF" || fail "init --no-review did not seed review off"
 
 echo "== ship: default auto-commits; --no-commit defers the commit to the caller =="
 # Default ship: done auto-commits the working tree.
@@ -223,13 +238,13 @@ $KURU set-status SL-0001 built --by builder >/dev/null
 $KURU set-status SL-0001 verifying --by verifier >/dev/null
 $KURU gate SL-0001 >/dev/null 2>&1
 $KURU set-status SL-0001 verified --by verifier >/dev/null
-# the board's next prefers BUILDING the fresh ready C over SHIPPING verified A:
+# the board's next prefers BUILDING the fresh ready C over reviewing/shipping verified A:
 $KURU next --json | grep -q '"id": "SL-0003"' \
-  && ok "board next prefers a ready sibling over shipping a verified slice" || fail "board ranking changed"
-# but next --slice keeps focus on A and says ship (this is the whole point):
+  && ok "board next prefers a ready sibling over a verified slice" || fail "board ranking changed"
+# but next --slice keeps focus on A; with review on (init default) its action is review:
 nx="$($KURU next --slice SL-0001 --json)"
-echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "ship"' \
-  && ok "next --slice SL-0001 stays on A (action ship), ignoring the board" || fail "next --slice drifted: $nx"
+echo "$nx" | grep -q '"id": "SL-0001"' && echo "$nx" | grep -q '"next_action": "review"' \
+  && ok "next --slice SL-0001 stays on A (action review), ignoring the board" || fail "next --slice drifted: $nx"
 # terminal/blocked slices report none with a clear reason:
 $KURU set-status SL-0001 done >/dev/null
 $KURU next --slice SL-0001 --json | grep -q '"reason": "done"' \
@@ -592,7 +607,7 @@ harness = r'''
 const parallel = async (thunks) =>
   Promise.all(thunks.map((t) => Promise.resolve().then(t).catch(() => null)))
 function makeAgent(scn) {
-  const calls = [], vcount = {}, ccount = {}, bcount = {}
+  const calls = [], vcount = {}, ccount = {}, bcount = {}, rcount = {}
   const agent = async (prompt) => {
     if (prompt.includes('/kuru:status')) return scn.plan
     // Pre-build contract critic (advisory): returns a verdict, never a status. A slice with
@@ -612,7 +627,7 @@ function makeAgent(scn) {
       calls.push('repair:' + id)
       return { id, status: 'ready' }
     }
-    const m = prompt.match(/\/kuru:(build|verify|ship)\s+(SL-[\w-]+)/)
+    const m = prompt.match(/\/kuru:(build|verify|review|ship)\s+(SL-[\w-]+)/)
     const cmd = m[1], id = m[2]
     calls.push(cmd + ':' + id)
     const sc = (scn.scripts && scn.scripts[id]) || {}
@@ -632,9 +647,20 @@ function makeAgent(scn) {
       if (sc.rejectTimes && vcount[id] <= sc.rejectTimes) return { id, status: 'rejected' }
       return { id, status: 'verified' }
     }
-    // shipRefused models the engine refusing a ship (slice not actually verified): the
-    // ledger status is unchanged. The pipeline must detect no-progress and stop after ONE
-    // attempt — never re-spin (this is the regression guard for the old 10x ship loop).
+    if (cmd === 'review') {
+      rcount[id] = (rcount[id] || 0) + 1
+      // reviewNoVerdict: the reviewer never recorded a verdict -> slice stays `verified`
+      // (models the stuck/no-progress guard). alwaysReviewReject / reviewRejectTimes:n mirror
+      // verify's reject knobs: a review rejection routes back to build as the next try.
+      if (sc.reviewNoVerdict) return { id, status: 'verified' }
+      if (sc.alwaysReviewReject) return { id, status: 'rejected' }
+      if (sc.reviewRejectTimes && rcount[id] <= sc.reviewRejectTimes) return { id, status: 'rejected' }
+      return { id, status: 'reviewed' }
+    }
+    // shipRefused models the engine refusing a ship (slice not actually verified/reviewed): the
+    // ledger status is unchanged (modeled as `verified` — the ship guard treats verified OR
+    // reviewed as no-progress). The pipeline must detect no-progress and stop after ONE attempt —
+    // never re-spin (this is the regression guard for the old 10x ship loop).
     if (cmd === 'ship') return { id, status: sc.shipRefused ? 'verified' : 'done' }
   }
   return { agent, calls }
@@ -712,7 +738,7 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
     eq('F2: built twice (one blocked try + one good try)',
        calls.filter((c) => c === 'build:SL-A').length, 2)
   }
-  { // G: pre-existing states - 'built' enters at verify, 'verified' enters at ship
+  { // G: pre-existing states - 'built' enters at verify, 'verified' enters at review (review on)
     const { agent, calls } = makeAgent({ plan: plan([
       { id: 'SL-A', status: 'built', dependsOn: [] },
       { id: 'SL-B', status: 'verified', dependsOn: [] }]) })
@@ -720,6 +746,8 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
     eq('G: pre-built/pre-verified both ship', S(o.shipped), ['SL-A','SL-B'])
     eq('G: no spurious re-build of a built/verified slice',
        calls.some((c) => c === 'build:SL-A' || c === 'build:SL-B'), false)
+    eq('G: pre-verified slice goes through review before ship (review on)',
+       calls.indexOf('review:SL-B') < calls.indexOf('ship:SL-B'), true)
   }
   { // H: two slices on the SAME gate target serialize -> A's whole pipeline before B starts
     const { agent, calls } = makeAgent({ plan: plan([
@@ -771,6 +799,37 @@ const plan = (slices, extra = {}) => ({ slices, doneIds: [], blockedIds: [], dra
     const o = await run({ maxTries: 2 }, agent, parallel)
     eq('M: un-satisfiable contract is capped', o.capped, ['SL-A'])
     eq('M: capped contract never reached build', calls.some((c) => c === 'build:SL-A'), false)
+  }
+  { // N: review ON (default) — a review rejection loops back to build (the next try) and ships within cap(2).
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { reviewRejectTimes: 1 } } })
+    const o = await run({ maxTries: 2 }, agent, parallel)
+    eq('N: a review rejection retries then ships', o.shipped, ['SL-A'])
+    eq('N: review rejection rebuilds — build+verify+review is one try (build & review each ran twice)',
+       [calls.filter((c) => c === 'build:SL-A').length, calls.filter((c) => c === 'review:SL-A').length], [2, 2])
+  }
+  { // O: a review that always rejects burns the whole try budget -> capped, never ships.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'ready', dependsOn: [] }]),
+      scripts: { 'SL-A': { alwaysReviewReject: true } } })
+    const o = await run({ maxTries: 2 }, agent, parallel)
+    eq('O: always-review-reject is capped', o.capped, ['SL-A'])
+    eq('O: capped-by-review did not ship', o.shipped, [])
+    eq('O: build ran maxTries times (each failing try includes its review)',
+       calls.filter((c) => c === 'build:SL-A').length, 2)
+  }
+  { // P: a review that records NO verdict leaves the slice `verified` -> stuck (no progress), never loops.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'verified', dependsOn: [] }]),
+      scripts: { 'SL-A': { reviewNoVerdict: true } } })
+    const o = await run({}, agent, parallel)
+    eq('P: no-verdict review is stuck', o.stuck.map((x) => x.id), ['SL-A'])
+    eq('P: no-verdict review did not ship and did not spin (review attempted once)',
+       [o.shipped, calls.filter((c) => c === 'review:SL-A').length], [[], 1])
+  }
+  { // Q: review OFF (args.review=false) — a verified slice ships straight to done, no review stage.
+    const { agent, calls } = makeAgent({ plan: plan([{ id: 'SL-A', status: 'verified', dependsOn: [] }]) })
+    const o = await run({ review: false }, agent, parallel)
+    eq('Q: review off -> verified ships straight to done', o.shipped, ['SL-A'])
+    eq('Q: review off -> no review stage ran', calls.some((c) => c === 'review:SL-A'), false)
   }
   process.exit(fails ? 1 : 0)
 })()

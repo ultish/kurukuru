@@ -10,7 +10,7 @@ live in JSON managed here so they cannot be hand-waved.
 Zero third-party dependencies: Python 3 stdlib only (ships on macOS/Linux).
 
 Usage:
-  kuru init [--stack T] [--profile DIR|URL] [--reuse-check off|warn|block]  scaffold .kuru/
+  kuru init [--stack T] [--profile DIR|URL] [--reuse-check off|warn|block] [--no-review]  scaffold .kuru/
   kuru set-stack <tool> [--target N [--discard-flat-gates|--migrate-flat-gates-to NAME]]
                                     rewrite config gates from a preset (or seed one target)
   kuru new-slice "<title>" [--epic E] [--target N]
@@ -21,6 +21,7 @@ Usage:
   kuru next                         print the next actionable slice
   kuru set-status <id> <status> [--note "..."] [--by agent|human] [--no-commit]
                                     (-> done auto-commits the working tree; --no-commit skips it)
+  kuru set-review <on|off>          toggle code review (on: verified -> review -> ship)
   kuru gate <id>                    run the configured deterministic gates
   kuru check <id>                   print whether <id> may advance to 'verified'
   kuru doctor                       sanity-check the .kuru workspace
@@ -28,7 +29,7 @@ Usage:
 
 Statuses (the slice state machine):
   draft -> ready -> in_progress -> built -> verifying -> verified -> done
-  verified -> reviewed -> done            (opt-in code review; /kuru:review)
+  verified -> reviewed -> done            (code review, on by default; /kuru:review)
   any -> blocked ;  verifying -> rejected -> in_progress
   any (except done) -> dropped -> draft   (retire a slice; resurrect to re-write it)
 """
@@ -66,8 +67,9 @@ TRANSITIONS = {
     "built": {"verifying", "in_progress", "blocked", "dropped"},
     "verifying": {"verified", "rejected", "blocked", "dropped"},
     "rejected": {"in_progress", "blocked", "dropped"},
-    # Code review is opt-in: a verified slice may ship straight to `done`, or take
-    # the `reviewed` detour via /kuru:review when a slice warrants a closer look.
+    # Code review is on by default (toggle: `kuru set-review`): a verified slice takes
+    # the `reviewed` detour via /kuru:review, or — review off — ships straight to `done`.
+    # A review that finds problems rejects (`verified -> rejected`).
     "verified": {"done", "reviewed", "rejected", "blocked", "dropped"},
     "reviewed": {"done", "in_progress", "blocked", "dropped"},
     "done": {"in_progress"},  # reopen; shipped work cannot be dropped
@@ -204,14 +206,32 @@ STATUS_ACTION = {
     "rejected": "build",
     "in_progress": "build",
     "ready": "build",
-    # Code review is opt-in (run /kuru:review by hand on a verified slice). The
-    # default pipeline ships a verified — or already-reviewed — slice straight to
-    # `done`. The ship transition is `set-status <id> done`; /kuru:loop runs it
-    # inline, while /kuru:ship (and /kuru:loop-workflow) wrap it as a /kuru:* verb.
-    "verified": "ship",
+    # A verified slice's action is review-policy-dependent (see action_for): review ON
+    # (the default) -> "review"; review OFF -> "ship". The ship transition is
+    # `set-status <id> done`; /kuru:loop runs it inline, while /kuru:ship (and
+    # /kuru:loop-workflow) wrap it as a /kuru:* verb.
+    "verified": "ship",      # fallback when review OFF; action_for overrides to "review" when ON
     "reviewed": "ship",
     "draft": "slice",        # needs a human to slice/contract it
 }
+
+
+def review_enabled(led: dict) -> bool:
+    """Workspace policy: must a `verified` slice pass through code review before it
+    can ship? `kuru init` seeds this ON; toggle with `kuru set-review off|on`.
+    Absent (a workspace created before this was a setting) reads as OFF, so
+    upgrading the plugin never silently inserts a review step into an existing
+    board — a fresh `init` is where the on-by-default applies."""
+    return bool(led.get("meta", {}).get("review", False))
+
+
+def action_for(led: dict, s: dict) -> str:
+    """Which /kuru:* step advances this slice. A `verified` slice routes to
+    `review` when review is enabled for this workspace, else straight to `ship`;
+    every other status is static (STATUS_ACTION)."""
+    if s["status"] == "verified" and review_enabled(led):
+        return "review"
+    return STATUS_ACTION[s["status"]]
 
 
 def deps_of(s: dict) -> list[str]:
@@ -397,7 +417,8 @@ def cmd_init(args):
     seed = {
         "config.json": config_text,
         "ledger.json": json.dumps(
-            {"meta": {"project": root.name, "created": now()}, "slices": []}, indent=2
+            {"meta": {"project": root.name, "created": now(),
+                      "review": not args.no_review}, "slices": []}, indent=2
         ) + "\n",
         "charter.md": render(read_template("charter.md"), DATE=now(), PROJECT=root.name),
         "progress.md": render(read_template("progress.md"), DATE=now(), PROJECT=root.name),
@@ -593,6 +614,7 @@ def cmd_ls(args):
     if getattr(args, "json", False):
         print(json.dumps(rows))
         return
+    print(f"code review: {'on — verified slices route through /kuru:review before ship' if review_enabled(led) else 'off — verified slices ship straight to done'}")
     if not rows:
         print("(no slices)")
         return
@@ -761,26 +783,27 @@ def cmd_env(args):
 def cmd_next(args):
     """The next thing a human/agent should pick up, in pipeline order."""
     led = load_ledger()
+    reviewing = review_enabled(led)
     label = {
         "verifying": "needs a verifier",
         "built": "ready to verify",
         "rejected": "rejected — back to builder",
         "in_progress": "build in progress",
         "ready": "ready to build",
-        "verified": "ready to ship (code review optional)",
+        "verified": "verified — ready for review" if reviewing else "ready to ship (review off)",
         "reviewed": "reviewed — ready to ship",
         "draft": "needs a contract before it can be built",
     }
     use_json = getattr(args, "json", False)
 
     def emit_action(s):
-        action = STATUS_ACTION[s["status"]]
+        action = action_for(led, s)
         if use_json:
             print(json.dumps({
                 "next_action": action, "id": s["id"], "status": s["status"],
                 "title": s["title"], "epic": s.get("epic"), "target": s.get("target"),
                 "depends_on": deps_of(s), "label": label[s["status"]],
-                "dir": str(kuru_dir() / "slices" / s["id"]),
+                "dir": str(kuru_dir() / "slices" / s["id"]), "review": reviewing,
             }))
             return
         tgt = f"  (target: {s['target']})" if s.get("target") else ""
@@ -830,7 +853,7 @@ def cmd_next(args):
                         waiting.append({"id": s["id"], "title": s["title"], "unmet": unmet})
                         continue
                 actionable.append({
-                    "next_action": STATUS_ACTION[s["status"]], "id": s["id"],
+                    "next_action": action_for(led, s), "id": s["id"],
                     "status": s["status"], "title": s["title"], "epic": s.get("epic"),
                     "target": s.get("target"), "depends_on": deps_of(s),
                     "label": label[s["status"]],
@@ -841,7 +864,8 @@ def cmd_next(args):
         done = [x["id"] for x in led["slices"] if x["status"] == "done"]
         if use_json:
             print(json.dumps({"actionable": actionable, "waiting": waiting,
-                              "draft": draft, "blocked": blocked, "done": done}))
+                              "draft": draft, "blocked": blocked, "done": done,
+                              "review": reviewing}))
             return
         if actionable:
             print(f"Actionable now ({len(actionable)}) — can run in parallel:")
@@ -889,6 +913,23 @@ def cmd_next(args):
         return
 
     emit_action(s)
+
+
+def cmd_set_review(args):
+    """Toggle the workspace review policy (meta.review). ON: a verified slice must
+    pass /kuru:review before it can ship (the loop drives it). OFF: a verified
+    slice ships straight to done. Held under the ledger lock like any mutation."""
+    on = args.state == "on"
+    with ledger_lock():
+        led = load_ledger()
+        led.setdefault("meta", {})["review"] = on
+        save_ledger(led)
+    if on:
+        print("code review ENABLED — a verified slice now routes through /kuru:review "
+              "before it can ship (the loop drives it; a rejection sends it back to build).")
+    else:
+        print("code review DISABLED — a verified slice ships straight to done. "
+              "Run /kuru:review by hand on the slices that warrant a closer look.")
 
 
 def cmd_set_status(args):
@@ -1296,6 +1337,7 @@ def cmd_doctor(args):
             print(f"  ⚠ {w}")
         sys.exit(1)
     print(f"OK — Kurukuru workspace healthy at {kd}")
+    print(f"  code review: {'on (verified -> review -> ship)' if review_enabled(led) else 'off (verified -> ship)'}")
     for w in warnings:
         print(f"  ⚠ {w}")
 
@@ -1325,6 +1367,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "off=none (default) · warn=advisory (WARN, never blocks) · "
                         "block=required (must be green or --waive'd to verify). "
                         "Needs the `dupehound` binary on PATH at gate time.")
+    s.add_argument("--no-review", dest="no_review", action="store_true",
+                   help="start with code review OFF — a verified slice ships straight to "
+                        "done, skipping the /kuru:review step. Default is review ON; toggle "
+                        "later with `kuru set-review on|off`.")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("set-stack"); s.add_argument("stack",
@@ -1373,6 +1419,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="for `done`: flip the ledger only, skip the auto-commit (the caller commits later — "
                         "used by /kuru:loop-workflow, which commits once after the parallel run)")
     s.set_defaults(fn=cmd_set_status)
+
+    s = sub.add_parser("set-review", help="turn code review on/off for this workspace "
+                                          "(on: verified -> review -> ship; off: verified -> ship)")
+    s.add_argument("state", choices=("on", "off")); s.set_defaults(fn=cmd_set_review)
 
     s = sub.add_parser("gate"); s.add_argument("id")
     s.add_argument("--waive", action="append", default=[], metavar="NAME[=REASON]",

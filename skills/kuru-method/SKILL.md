@@ -16,9 +16,10 @@ narration.
 
 ```mermaid
 flowchart LR
-    charter --> spec --> slice --> check[check-contract] --> build --> verify --> done
+    charter --> spec --> slice --> check[check-contract] --> build --> verify --> review --> done
     check -. flagged: re-slice .-> slice
-    verify -. opt-in .-> review --> done
+    review -. rejects .-> build
+    verify -. review off .-> done
 ```
 
 - **charter** — shared understanding with the humans. Problem, users, success
@@ -40,10 +41,13 @@ flowchart LR
   it builds tests that can actually run here. (`/kuru:build`, skill `building-a-slice`)
 - **verify** — a SEPARATE `kuru-verifier` subagent gatekeeps against the frozen
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
-- **review** *(opt-in)* — code review on the diff for slices that warrant a closer
-  look. The quality axis (verify already settled the spec axis): repo conventions
-  first, skip what the gates enforce, Fowler's smells as the baseline. Not a required
-  step: a verified slice ships straight to `done`, and the loop never runs review.
+- **review** *(on by default; toggleable)* — code review on the diff. The quality axis
+  (verify already settled the spec axis): repo conventions first, skip what the gates
+  enforce, Fowler's smells as the baseline. **`kuru init` seeds review on**, so the loop
+  routes each verified slice through `/kuru:review` before ship (a rejection sends it back
+  to build, like a verify rejection). Turn it off per-workspace with `kuru set-review off`
+  — then a verified slice ships straight to `done`. Which applies is a machine fact: the
+  engine returns action `review` vs `ship` for a `verified` slice.
   (`/kuru:review`, skill `reviewing-a-slice`)
 - **ship** — the terminal transition: a `verified` (or `reviewed`) slice → `done`, which
   auto-commits the working tree. Humans can run `set-status <id> done` directly;
@@ -59,7 +63,7 @@ question is unresolved; slicing freezes the spec into contracts, so an unanswere
 question becomes a guess locked inside one.
 
 The first three phases need a human. Once every slice has a frozen contract, the
-build → verify → done cycle is mechanical and can be driven
+build → verify → review → ship cycle is mechanical and can be driven
 automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,
 spawning a fresh builder and a **separate** verifier per slice, and stops on any
 `blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
@@ -68,8 +72,9 @@ use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
 <id>` (so it can't drift onto a ready sibling the board would rank first). To work
 **several independent slices in parallel**, use `/kuru:loop-workflow` — it authors a
 Claude Code **dynamic workflow** (a JS script the user approves and the workflow runtime runs
-in the background) that drives **one `build → verify → ship` pipeline per slice**, each stage a
-**fresh, isolated `agent()`**. Concurrency is keyed on the **gate target**: a target runs **at
+in the background) that drives **one `build → verify → review → ship` pipeline per slice** (review
+when the workspace has it on), each stage a **fresh, isolated `agent()`**. Concurrency is keyed on
+the **gate target**: a target runs **at
 most one** slice's pipeline at a time (**same target → serialized** — the no-worktrees lesson:
 the slices share one working tree, so parallel builds clobber each other and a build-in-flight
 contaminates a same-tree verify, which re-runs the gates and drives the app), while **different
@@ -101,10 +106,10 @@ stateDiagram-v2
     built --> verifying
     verifying --> verified
     verifying --> rejected
-    verified --> done: ship (review opt-in)
-    verified --> reviewed: /kuru:review
+    verified --> reviewed: /kuru:review (review on)
+    verified --> done: ship (review off)
     verified --> rejected: review rejects
-    reviewed --> done
+    reviewed --> done: ship
     rejected --> in_progress
     done --> in_progress: reopen
     done --> [*]
@@ -115,11 +120,15 @@ dropped → draft** (retire/resurrect); and three "step back" edges for reworkin
 without dropping — **ready → draft**, **built → in_progress**, and
 **reviewed → in_progress**.
 
-Code review is **opt-in**: a verified slice ships straight to `done`, and the loop
-never reviews. When you do run `/kuru:review`, both the verifier (`verifying ->
-rejected`) and that review (`verified -> rejected`) can send a slice back to the
-builder. There is no `verified -> in_progress`; a failed review rejects, and
-`rejected -> in_progress` resumes the build.
+Code review is **on by default** (`kuru init` seeds it; `kuru set-review off` disables
+it per workspace). With review on, the loop routes a verified slice through
+`/kuru:review` (`verified -> reviewed -> done`); with it off, a verified slice ships
+straight to `done`. The **ship** action is what sets a slice to `done` — there is no
+separate "shipped" status; `done` is the terminal state, reached from `reviewed` (review
+on) or `verified` (review off). Both the verifier (`verifying -> rejected`) and the
+review (`verified -> rejected`) can send a slice back to the builder. There is no
+`verified -> in_progress`; a failed review rejects, and `rejected -> in_progress`
+resumes the build.
 
 `dropped` retires a slice that should not be built (wrong scope, superseded —
 `kuru set-status <id> dropped --note "<why>"`). `next` and the loop ignore it.
@@ -205,8 +214,9 @@ repo, so resolve its path in this order:
 | `ls [--status S] [--json]` | Table (or JSON array) of slices. |
 | `show <id> [--json]` | Slice JSON + artifact presence (+ gate + rejection count). |
 | `env <id> [--json]` | The resolved environment a slice's target runs in — follows the target's `profile` pointer to `.kuru/profiles/<name>.json` and prints its `environment` (deploy topology, `verification_access`) + `conventions`. The deterministic feed the builder/verifier read **before** choosing how to build/verify, so a test isn't built that can't run here. "NONE RECORDED" if no profile is pinned. |
-| `next [--json] [--slice <id>] [--all]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. With `--all`, **every** slice actionable now (deps satisfied) plus `waiting`/`draft`/`blocked`/`done` — the parallel batch `/kuru:loop-workflow` drives on. |
+| `next [--json] [--slice <id>] [--all]` | Next actionable slice, in pipeline order (skips dependency-blocked slices). A `verified` slice's action is **`review`** when this workspace has review on, else **`ship`**; the JSON carries a top-level **`review`** boolean (the workspace policy). With `--slice`, the next action for **that one slice only** (or `none` with reason `done`/`blocked`/`waiting_on_deps`) — what `/kuru:loop-slice` drives on. With `--all`, **every** slice actionable now (deps satisfied) plus `waiting`/`draft`/`blocked`/`done` **and `review`** — the parallel batch `/kuru:loop-workflow` drives on. |
 | `set-status <id> <status> [--note ..] [--by human\|builder\|verifier\|reviewer] [--no-commit]` | Guarded transition. Transitioning **to `done` auto-commits** the working tree (`kuru: ship <id> — <title>`); best-effort, never blocks the transition. **`--no-commit`** flips the ledger to `done` but skips the commit, leaving it to the caller (used by `/kuru:loop-workflow`, which commits once after the parallel run). Serialized by `.kuru/.ledger.lock` so parallel `loop-workflow` writes don't race. |
+| `set-review <on\|off>` | Toggle this workspace's code-review policy (`meta.review`). **On** (the `kuru init` default): a `verified` slice must pass `/kuru:review` before it can ship — the loop routes it there, and a review rejection sends it back to build (the next try). **Off**: a `verified` slice ships straight to `done`. Policy only routes `next`; the `verified → done` transition stays legal either way. |
 | `gate <id> [--waive NAME[=REASON]]` | Run the slice's gates; write `gate-results.json`; non-zero on fail. In a multi-target repo, runs only the slice's target's gates, in that target's `dir`. `--waive` lets a **failing required** gate proceed for THIS run, recording the reason in `gate-results.json` (per-run only — not persisted; the verifier still sees it and may reject). |
 | `check <id>` | Read-only: may this slice reach `verified`? |
 | `doctor` | Validate the workspace. Hard ✗ on missing core files / no gates / unknown deps / a `profile` pointer to a missing file; a target `dir` that doesn't exist **yet** (a not-yet-built slice will create it) and a target with **no `profile`/environment** are ⚠ warnings, not failures. |

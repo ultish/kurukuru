@@ -1,20 +1,23 @@
 ---
-description: Drive ready slices through PER-SLICE build→verify→ship pipelines by authoring and launching a Claude Code dynamic workflow — same-target slices serialize (one shared tree), different-target slices run in parallel, all dependency-ordered. Fresh context per build/verify/ship. Optionally scope to a single slice or a comma-separated set.
+description: Drive ready slices through PER-SLICE build→verify→review→ship pipelines by authoring and launching a Claude Code dynamic workflow — same-target slices serialize (one shared tree), different-target slices run in parallel, all dependency-ordered. Fresh context per build/verify/review/ship; review runs when the workspace has it on. Optionally scope to a single slice or a comma-separated set.
 argument-hint: "[slice-id | id1,id2,... ] [max-tries, default 2]"
 ---
 
 Use the `loop-workflow` skill for context — it holds the full design and the reference script.
 
 This is the **per-slice-pipeline** autonomous driver. It runs the mechanical `build → verify →
-ship` part of the pipeline over the actionable slices (dependencies satisfied), but unlike
+review → ship` part of the pipeline over the actionable slices (dependencies satisfied), but unlike
 `/kuru:loop` it does so as a **Claude Code dynamic workflow**: you author a JavaScript
 orchestration script, the user approves it, and the workflow runtime runs each stage as a fresh,
 isolated `agent()`. That per-step clean context is the point — it's why this can clear a large
 board without the orchestrator's context degrading, and why it supersedes `runner.py`.
 
 The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are still done by a human
-first; this only loops the deterministic part. **Code review is opt-in** — a verified slice ships
-straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
+first; this only loops the deterministic part. **Code review runs when this workspace has it on**
+(the `kuru init` default): each verified slice routes through a fresh `/kuru:review` before it can
+ship, and a review rejection sends it back to build like a verify rejection. Turn it off with
+`kuru set-review off` (then a verified slice ships straight to `done`). Read the policy from the
+board (`kuru next --all --json` → `.review`) and pass it to the workflow as **`args.review`**.
 
 ## What this command does (it does not drive the slices itself)
 
@@ -25,7 +28,9 @@ straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
    run in parallel (different targets) vs serialize (same target) and the dependency edges before
    anything runs.
 3. **Author the workflow script** per the `loop-workflow` skill's reference shape, parameterized
-   to this board and to `$ARGUMENTS` (passed as the workflow's `args`). **Critical**: agents must
+   to this board and to `$ARGUMENTS` (passed as the workflow's `args`) — including **`args.review`**
+   set from the board's `.review` (step 2), so the run honors this workspace's review policy.
+   **Critical**: agents must
    NOT use `isolation: 'worktree'` — they all run in the same project tree to read/write the
    shared `ledger.json`. Then **launch it directly with the `Workflow` tool**. Do **not** print
    the script and ask the user to confirm first — the `Workflow` tool's own approval card already
@@ -33,11 +38,12 @@ straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
    the script twice). Hand the script to the tool; the runtime then asks the user to approve and
    runs it in the background (`/workflows` shows live progress). Do not invoke other slash
    commands yourself to drive slices; the workflow's agents do that via `/kuru:build`,
-   `/kuru:verify`, `/kuru:ship`.
+   `/kuru:verify`, `/kuru:review` (when review is on), `/kuru:ship`.
 4. **After the workflow returns, commit once** (see Termination & reporting) — the run's shipped
    slices are `done` in the ledger but not yet committed.
 
-The script (see skill) drives **one `build → verify → ship` pipeline per slice**, keyed on the
+The script (see skill) drives **one `build → verify → review → ship` pipeline per slice** (review
+runs only when `args.review` is on; else `build → verify → ship`), keyed on the
 **gate target** for concurrency: a planning agent reads `/kuru:status` once (each slice's status,
 `depends_on`, and **target**), then a target-mutex scheduler runs each slice's pipeline as fresh,
 isolated `agent()`s. **Same target → serialized** (a target runs at most one slice's pipeline at a
@@ -48,11 +54,12 @@ subtrees can't contaminate each other). **Dependency-ordered**: a slice starts o
 Before a slice's **first build this run**, its pipeline runs an advisory **contract check**
 (`/kuru:check-contract <id>`): a flagged contract is repaired by the planner (`draft` → rewrite →
 `ready`) and re-checked before any build, so a build→verify loop is never wasted on a contract no
-build could satisfy. **Any** failed build→verify cycle — a verify `rejected`, a build that goes
-`blocked`, or a verify with no recorded verdict — loops the slice back through a fresh build
-**within its own pipeline** and consumes one **try** (one try = one full build→verify cycle),
-capped by `maxTries`; the try/repair caps and the blocked-stops-a-dependent rule are enforced in
-the script. A single-target repo therefore runs fully sequentially (correct — you can't safely
+build could satisfy. **Any** failed build→verify(→review) cycle — a verify `rejected`, a **review
+`rejected`** (when review is on), a build that goes `blocked`, or a verify with no recorded
+verdict — loops the slice back through a fresh build **within its own pipeline** and consumes one
+**try** (one try = one full build→verify→review cycle), capped by `maxTries`; the try/repair caps
+and the blocked-stops-a-dependent rule are enforced in the script. A single-target repo therefore
+runs fully sequentially (correct — you can't safely
 parallelize one tree without worktrees); a polyglot/monorepo runs one pipeline per app at once.
 
 ## Arguments (`$ARGUMENTS`)
@@ -65,11 +72,12 @@ Parse up to two tokens, in any order, and pass them through as the workflow's `a
   named slices on **different** gate targets run in parallel, named slices on the **same** target
   serialize. A single id is the degenerate **single-slice** case. Omit the scope entirely to drive
   the **whole board**.
-- A bare **integer** → **`args.maxTries`** (default **2**): how many **build→verify tries** a slice
-  gets **in this run** before the workflow stops driving it and surfaces it. One try is a full
-  `build → verify` cycle: the first build→verify is try 1; a `rejected` verdict sends the slice back
-  through build **and** re-verify, which is try 2; and so on. After the try-`maxTries` verify is
-  rejected, the slice is capped.
+- A bare **integer** → **`args.maxTries`** (default **2**): how many **build→verify(→review) tries**
+  a slice gets **in this run** before the workflow stops driving it and surfaces it. One try is a
+  full `build → verify → review` cycle (just `build → verify` when review is off): the first cycle
+  is try 1; a `rejected` verdict from **verify or review** sends the slice back through build (and
+  re-verify, and re-review), which is try 2; and so on. After the try-`maxTries` cycle is rejected,
+  the slice is capped.
 
 So: `/kuru:loop-workflow` · `/kuru:loop-workflow 5` · `/kuru:loop-workflow SL-0002` ·
 `/kuru:loop-workflow SL-0002 5` · `/kuru:loop-workflow SL-0001,SL-0002,SL-0011` ·

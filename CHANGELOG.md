@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-09
+
+### Added
+- **Code review is on by default, as a per-workspace policy.** `kuru init` now seeds
+  `meta.review: true` in the ledger, and the loops route every `verified` slice through
+  `/kuru:review` before it can ship. The policy is a machine fact: `kuru next` returns
+  action **`review`** (not `ship`) for a verified slice when review is on, and its JSON
+  carries a top-level **`review`** boolean.
+  - New engine surface: **`kuru set-review on|off`** toggles the policy; **`kuru init
+    --no-review`** starts a workspace with it off. `kuru ls` and `kuru doctor` report the
+    current policy. Absent flag (workspaces created before this release) reads as **off**,
+    so upgrading never silently inserts a review step into an existing board.
+- **Review is part of the retry budget.** A try is now one full **build → verify → review**
+  cycle (still just build → verify when review is off), counted at the build. A **review
+  rejection** (`verified → rejected`) loops the slice back to a fresh build and consumes the
+  next try, exactly like a verify rejection — it does **not** get a separate budget. Applies
+  across `/kuru:loop`, `/kuru:loop-slice`, `/kuru:loop-workflow`, and `runner.py`.
+  - `/kuru:loop-workflow` reads the policy from `kuru next --all --json` (`.review`) and
+    passes it to the workflow as `args.review`; the reference pipeline adds a `review` stage
+    (a no-verdict review is `stuck`, a rejection rebuilds). The engine selftest gains review
+    coverage (197 checks, was 184).
+
 ## [2.0.0] - 2026-07-09
 
 ### Added

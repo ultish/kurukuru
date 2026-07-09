@@ -1,5 +1,5 @@
 ---
-description: Autonomously run the build→verify→done loop over ready slices until the board is clear (code review is opt-in). Requires charter + spec + frozen slices to already exist.
+description: Autonomously run the build→verify→review→ship loop over ready slices until the board is clear (review runs when the workspace has it on — the default; toggle with `kuru set-review`). Requires charter + spec + frozen slices to already exist.
 argument-hint: "[max-tries, default 2]"
 ---
 
@@ -8,19 +8,22 @@ Use the `kuru-method` skill for context.
 This is the **optional autonomous driver** for the mechanical part of the pipeline.
 The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are done by a
 human first; once every slice has a **frozen contract**, the per-slice
-build → verify → done cycle is deterministic enough to loop. **Code review is
-opt-in** — the loop ships a verified slice straight to `done`; run `/kuru:review
-<id>` by hand on the slices that warrant a closer look. The manual `/kuru:*`
-commands still work — this just runs them for you, in `kuru next` order, until
-there is nothing left to do.
+build → verify → review → ship cycle is deterministic enough to loop. **Code review
+runs when this workspace has it on** — the `kuru init` default; the loop dispatches a
+fresh reviewer on each verified slice and a review rejection sends it back to build like a
+verify rejection. Turn it off with `kuru set-review off` (then a verified slice ships
+straight to `done`). Which one applies is decided by the engine: **act on the `action`
+`kuru next` returns** (`review` vs `ship`). The manual `/kuru:*` commands still work —
+this just runs them for you, in `kuru next` order, until there is nothing left to do.
 
-`max-tries` (from `$ARGUMENTS`, default **2**) caps how many **build→verify tries** a
-single slice gets **in this run** before the loop stops and asks for a human. One try is
-one full `build → verify` cycle; **any** failed cycle — a verify rejection, a build that
-goes `blocked` (the builder gave up / gates stayed red), or a verify that records no
-verdict — consumes a try and is retried with a **fresh** subagent. The budget is **per
-run**: re-running `/kuru:loop` resets every slice's tally to 0, so the cap governs only
-the current run — not the slice's lifetime.
+`max-tries` (from `$ARGUMENTS`, default **2**) caps how many **build→verify(→review)
+tries** a single slice gets **in this run** before the loop stops and asks for a human.
+One try is one full `build → verify → review` cycle (just `build → verify` when review is
+off); **any** failed cycle — a verify rejection, a **review rejection**, a build that goes
+`blocked` (the builder gave up / gates stayed red), or a verify that records no verdict —
+consumes a try and is retried with a **fresh** subagent. The budget is **per run**:
+re-running `/kuru:loop` resets every slice's tally to 0, so the cap governs only the
+current run — not the slice's lifetime.
 
 To drive **one specific slice** to `done` and stop there (instead of clearing the whole
 board), use **`/kuru:loop-slice <id>`**. To work several independent slices **in
@@ -60,8 +63,9 @@ Repeat until a stop condition fires:
    | `rejected` | dispatch a **fresh `kuru-builder`**, passing the verifier's rejection note so it fixes the named failures. |
    | `built` | set `built → verifying`, then dispatch a **fresh `kuru-verifier`** subagent (as `/kuru:verify`). |
    | `verifying` | a verification was claimed but not finished (e.g. a prior session died) → dispatch a **fresh `kuru-verifier`** (as `/kuru:verify`); no status change needed. |
-   | `verified` | **ship it** — `set-status <id> done` (this auto-commits the slice: code + `.kuru/` artifacts + ledger, as one commit). Code review is opt-in and the loop does **not** run it. (Slices you want reviewed: run `/kuru:review <id>` by hand before/instead of looping, or pause the loop for them.) |
-   | `reviewed` | reviewed by hand in a prior session but not shipped → `set-status <id> done` (auto-commits, as above). |
+   | `verified` — action `review` (review **on**) | dispatch a **fresh `kuru-reviewer`** (as `/kuru:review <id>`), distinct from the builder/verifier. A clean review records `reviewed`; a rejection records `rejected` — which routes the slice **back to build as the next try** (it counts toward `max-tries`, exactly like a verify rejection). |
+   | `verified` — action `ship` (review **off**) | **ship it** — `set-status <id> done` (this auto-commits the slice: code + `.kuru/` artifacts + ledger, as one commit). |
+   | `reviewed` | ship it — `set-status <id> done` (auto-commits, as above). |
 
 5. After a build or verify, read `kuru show <id>`. If it left the slice **`blocked`**
    (the builder gave up / gates wouldn't go green) or **`verifying`** with no recorded
@@ -102,15 +106,17 @@ planner does the repair, the engine records the `draft→ready` transitions.
   implemented a slice also verify it — the independence is the whole reason this
   works. The engine refuses `verified --by builder`, but you must also not reuse
   the builder's context to verify.
-- **A try is a full `build → verify` cycle; cap tries, per run.** Keep a this-run tally
-  per slice, starting at 0 when the loop starts, and count a try at the **build** that
-  starts each cycle — so the budget bounds build→verify cycles, **not just verify
-  rejections**. Any failed cycle consumes a try: a verify (or manual review) that
-  **rejects**, a build that goes **blocked**, or a verify that records **no verdict**. Do
-  **not** read the slice's lifetime `rejections` from `show` — the budget is per run, so a
-  re-run gets a fresh one. When a slice's this-run tally reaches `max-tries`, STOP:
-  `set-status <id> blocked --note "exhausted N build→verify tries this run: <last
-  failure>"` and hand to a human. Do not spin forever.
+- **A try is a full `build → verify → review` cycle; cap tries, per run.** Keep a
+  this-run tally per slice, starting at 0 when the loop starts, and count a try at the
+  **build** that starts each cycle — so the budget bounds build→verify(→review) cycles,
+  **not just verify rejections**. Any failed cycle consumes a try: a verify that
+  **rejects**, a **review that rejects** (when review is on), a build that goes
+  **blocked**, or a verify that records **no verdict**. Review is part of the same try —
+  a review rejection rebuilds and does not get its own separate budget. Do **not** read
+  the slice's lifetime `rejections` from `show` — the budget is per run, so a re-run gets
+  a fresh one. When a slice's this-run tally reaches `max-tries`, STOP: `set-status <id>
+  blocked --note "exhausted N build→verify tries this run: <last failure>"` and hand to a
+  human. Do not spin forever.
 - **Check the contract before building, repair before looping.** Don't dispatch a
   builder on a `ready` slice that hasn't gone `CONTRACT OK` this run. A flagged contract
   is repaired by the **planner** (a fresh subagent, distinct from builder/verifier) via

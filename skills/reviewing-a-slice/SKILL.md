@@ -1,16 +1,19 @@
 ---
 name: reviewing-a-slice
-description: Use when code-reviewing a verified Kurukuru slice (the opt-in review step, /kuru:review). Covers what review is FOR versus verify, the standards-source hierarchy (charter conventions first, gates already cover the rest, Fowler's code smells as the fallback baseline), scoping to the slice diff, and the verdict rule — reviewed, or reject back to the builder.
+description: Use when code-reviewing a verified Kurukuru slice (the review step, /kuru:review — on by default). Covers what review is FOR versus verify, the standards-source hierarchy (charter conventions first, gates already cover the rest, Fowler's code smells as the fallback baseline), scoping to the slice diff, and the verdict rule — reviewed, or reject back to the builder.
 ---
 
 # Reviewing a slice
 
-Review is the **quality axis**, and it is **opt-in**. By the time a slice reaches
-here it is already `verified` — the `kuru-verifier` proved, on concrete evidence,
-that the frozen contract is satisfied (the *spec axis*). Review asks a different
-question: **is the code any good?** Well-named, non-duplicated, maintainable,
-secure. A slice can be fully correct and still be a mess worth fixing before it
-becomes part of the codebase other slices build on.
+Review is the **quality axis**, and it is **on by default** (`kuru init` seeds it;
+`kuru set-review off` disables it per workspace, and then a verified slice ships
+straight to `done`). By the time a slice reaches here it is already `verified` — the
+`kuru-verifier` proved, on concrete evidence, that the frozen contract is satisfied
+(the *spec axis*). Review asks a different question: **is the code any good?**
+Well-named, non-duplicated, maintainable, secure. A slice can be fully correct and
+still be a mess worth fixing before it becomes part of the codebase other slices
+build on. In the loop, a review rejection sends the slice back to the builder (it
+counts as that slice's next build→verify→review try).
 
 Do not re-run verification here. If you find yourself re-checking acceptance
 criteria, you're in the wrong step — that was the verifier's job and it's done.

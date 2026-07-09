@@ -7,9 +7,9 @@ across many sessions — not vibe-coding, not hobby projects.
 Shared understanding becomes a spec; the spec becomes **vertical slices** that are
 small enough for one agent session yet complete enough to build without guessing;
 a builder agent implements one slice; a **separate** verifier agent gatekeeps it
-against a **frozen contract** with concrete evidence and deterministic gates;
-optionally, a slice is also code-reviewed before it ships. Progress is tracked in
-files so each session can pick up cold.
+against a **frozen contract** with concrete evidence and deterministic gates; by
+default a slice is also code-reviewed before it ships (toggle per workspace with
+`kuru set-review`). Progress is tracked in files so each session can pick up cold.
 
 ## Why (the three sources)
 
@@ -102,7 +102,7 @@ Then, in Claude Code:
 /kuru:check-contract     # OPTIONAL pre-build: is a slice's contract satisfiable + verifiable here?
 /kuru:build              # kuru-builder implements the next ready slice -> built
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
-/kuru:review             # OPTIONAL code review of a verified slice -> reviewed -> done
+/kuru:review             # code review of a verified slice -> reviewed -> done (on by default)
 /kuru:status             # dashboard      /kuru:next   # what to do next
 /kuru:reuse-stats        # reuse-index lookup rollup across builds (advisory)
 /kuru:bearings           # run at the start of every session
@@ -111,15 +111,16 @@ Then, in Claude Code:
 The first three steps need a human (discovery, scoping, slicing). Once slices have
 frozen contracts, the rest is mechanical. There are three ways to drive it:
 
-- **In-session (sequential):** `/kuru:loop` runs build → verify → done over the ready
-  slices, one at a time, until the board is clear (code review is opt-in — run
-  `/kuru:review` by hand). To ship just **one** named slice and stop there, use
-  `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
+- **In-session (sequential):** `/kuru:loop` runs build → verify → review → ship over the ready
+  slices, one at a time, until the board is clear (review runs when the workspace has it on — the
+  `kuru init` default; a review rejection rebuilds like a verify rejection). To ship just **one**
+  named slice and stop there, use `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
 - **Dynamic workflow (per-slice pipelines):** `/kuru:loop-workflow` runs the same build →
-  verify → ship cycle, but it authors a Claude Code **dynamic workflow** — a JavaScript script
+  verify → review → ship cycle, but it authors a Claude Code **dynamic workflow** — a JavaScript script
   you approve, which the workflow runtime runs in the background. It asks the engine
   `kuru next --all` for the ready set, shows you the plan and dependency edges first, then runs
-  **one `build → verify → ship` pipeline per slice**, each stage a **fresh, isolated `agent()`**.
+  **one `build → verify → review → ship` pipeline per slice** (review runs when the workspace has
+  it on), each stage a **fresh, isolated `agent()`**.
   Concurrency is keyed on the **gate target**: a target runs **at most one** slice's pipeline at
   a time (**same target → serialized** — the no-worktrees lesson: slices share one working tree,
   so parallel builds clobber each other and a build-in-flight contaminates a same-tree verify),
@@ -138,8 +139,9 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
 
 Across all three, `max-tries` is **per run**: re-running a `loop*` command resets every
 slice's try tally, so the cap governs only the current run. A **try** is one full
-`build → verify` cycle, counted at the build — so a failed *build* (the builder gives up →
-`blocked`) is retried with a fresh agent just like a verify rejection, up to `max-tries`.
+`build → verify → review` cycle (just `build → verify` when review is off), counted at the
+build — so a failed *build* (the builder gives up → `blocked`), a verify rejection, OR a
+review rejection is retried with a fresh agent, up to `max-tries`.
 A slice already blocked before the run is left for a human, not auto-retried.
 
 Both refuse to start until charter + spec + non-draft (contracted) slices exist,
@@ -259,8 +261,9 @@ charter's conversion to a multi-app config automatically.
 `runner.py` is a standalone Python loop (stdlib only) that drives the plugin with
 no human in the chair. It reads engine state (`kuru next --json`) to **decide**
 the next step, then launches a **fresh `claude -p` session** to **do** it
-(`/kuru:build`, `/kuru:verify`) — or, for a verified slice, ships it straight to
-`done` itself, since code review is opt-in. It repeats until the board is clear.
+(`/kuru:build`, `/kuru:verify`, and `/kuru:review` when the workspace has review on) —
+and ships a shippable slice (`verified` with review off, or `reviewed`) to `done`
+itself. It repeats until the board is clear.
 Each step is its own process, so context never accumulates and the builder and
 verifier are separate processes, not just separate agents. It never writes
 progress status itself (the one exception being the verified→done ship), so the
@@ -314,7 +317,7 @@ python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
 |---|---|---|
 | `--repo` | `.` | Target repo containing `.kuru/`. |
 | `--plugin-dir` | dir of `runner.py` | Where the kuru plugin lives. |
-| `--max-retries` | `2` | Per-slice rejection cap (verifier, or a manual review) before it `blocked`s and stops. |
+| `--max-retries` | `2` | Per-slice, per-run cap on build→verify(→review) tries (a verify or review rejection, or a blocked build, each costs a try) before it `blocked`s and stops. |
 | `--max-iters` | `100` | Global safety cap on loop iterations. |
 | `--permission-mode` | `bypassPermissions` | Passed to `claude` per step. |
 | `--settings` / `--allowed-tools` | — | Tighten permissions instead of bypassing. |
@@ -333,10 +336,10 @@ stateDiagram-v2
     built --> verifying
     verifying --> verified
     verifying --> rejected
-    verified --> done: ship (review opt-in)
-    verified --> reviewed: /kuru:review
+    verified --> reviewed: /kuru:review (review on)
+    verified --> done: ship (review off)
     verified --> rejected: review rejects
-    reviewed --> done
+    reviewed --> done: ship
     rejected --> in_progress
     done --> in_progress: reopen
     done --> [*]
@@ -348,10 +351,13 @@ a re-write); and three "step back" edges that let you rework without dropping �
 **ready → draft** (re-slice), **built → in_progress** (resume building before
 verifying), and **reviewed → in_progress** (reopen a reviewed slice).
 
-**Code review is opt-in.** A verified slice ships straight to `done`; run
-`/kuru:review` by hand on the slices that warrant a closer look. A review that
-finds real problems rejects the slice (`verified -> rejected`), routing it back to
-the builder — there is no `verified -> in_progress`.
+**Code review is on by default.** `kuru init` seeds it on, so the loop routes each
+verified slice through `/kuru:review` before ship (`verified -> reviewed -> done`);
+turn it off per workspace with `kuru set-review off`, and a verified slice ships
+straight to `done`. Either way, a review that finds real problems rejects the slice
+(`verified -> rejected`), routing it back to the builder — there is no
+`verified -> in_progress`. The policy is a machine fact (`kuru next` returns action
+`review` vs `ship`), not agent narration.
 
 **Reaching `done` auto-commits.** Whatever path a slice takes to `done`, the engine
 commits the working tree as one slice-sized commit — the code, the `.kuru/`
@@ -437,11 +443,11 @@ exposes:
   - /kuru:check-contract — optional pre-build: kuru-contract-critic flags an unsatisfiable/unverifiable contract
   - /kuru:build       — kuru-builder implements the next ready slice
   - /kuru:verify      — kuru-verifier independently gatekeeps a built slice
-  - /kuru:review      — optional code review before marking done
+  - /kuru:review      — code review before marking done (on by default; kuru set-review to toggle)
   - /kuru:ship        — mark a verified/reviewed slice done (auto-commits)
-  - /kuru:loop          — autonomous build→verify→done loop over all ready slices (sequential)
+  - /kuru:loop          — autonomous build→verify→review→ship loop over all ready slices (sequential)
   - /kuru:loop-slice    — same loop scoped to a single named slice
-  - /kuru:loop-workflow — parallel build→verify→ship over all ready slices, as a dynamic workflow
+  - /kuru:loop-workflow — parallel build→verify→review→ship over all ready slices, as a dynamic workflow
   - /kuru:next        — print and start the next actionable slice
   - /kuru:status      — delivery dashboard
   - /kuru:reuse-stats — roll up builders' reuse-index lookups across slices (advisory)

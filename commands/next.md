@@ -13,9 +13,11 @@ status, recommend (and offer to start) the matching command:
 - `built` → `/kuru:verify <id>` (with an independent verifier).
 - `verifying` → `/kuru:verify <id>` (a verification was claimed but not finished —
   re-verify with a fresh, independent verifier).
-- `verified` → ship it: `/kuru:ship <id>` (or the equivalent `set-status <id> done`),
-  which auto-commits the slice. Code review is opt-in — offer `/kuru:review <id>` for a
-  closer look, but it isn't required.
+- `verified` → follow the action `kuru next` returns (it reflects this workspace's review policy):
+  - action `review` (review **on**, the default) → `/kuru:review <id>` — a fresh reviewer;
+    a clean review → `reviewed`, a rejection → `rejected` (back to the builder).
+  - action `ship` (review **off**) → ship it: `/kuru:ship <id>` (or `set-status <id> done`),
+    which auto-commits the slice.
 - `reviewed` → ship it: `/kuru:ship <id>` (or `set-status <id> done`), auto-commits the slice.
 
 If nothing is actionable, say whether everything is `done`/`blocked` and suggest
