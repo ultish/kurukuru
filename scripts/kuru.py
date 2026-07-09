@@ -353,7 +353,7 @@ def cmd_init(args):
     kd = root / ".kuru"
     if kd.exists() and not args.force:
         die(f"{kd} already exists (use --force to re-scaffold missing files)")
-    for sub in ("", "slices", "prd"):
+    for sub in ("", "slices", "spec"):
         (kd / sub).mkdir(parents=True, exist_ok=True)
 
     # Optional reusable environment profiles (kept OUTSIDE the plugin by the user).

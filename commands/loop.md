@@ -1,12 +1,12 @@
 ---
-description: Autonomously run the build→verify→done loop over ready slices until the board is clear (code review is opt-in). Requires charter + PRD + frozen slices to already exist.
+description: Autonomously run the build→verify→done loop over ready slices until the board is clear (code review is opt-in). Requires charter + spec + frozen slices to already exist.
 argument-hint: "[max-tries, default 2]"
 ---
 
 Use the `kuru-method` skill for context.
 
 This is the **optional autonomous driver** for the mechanical part of the pipeline.
-The judgment-heavy phases (`/kuru:charter`, `/kuru:prd`, `/kuru:slice`) are done by a
+The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are done by a
 human first; once every slice has a **frozen contract**, the per-slice
 build → verify → done cycle is deterministic enough to loop. **Code review is
 opt-in** — the loop ships a verified slice straight to `done`; run `/kuru:review
@@ -29,12 +29,12 @@ parallel** in one workflow, use **`/kuru:loop-workflow`**.
 ## Preconditions — refuse to start unless ALL hold
 
 Run these checks first; if any fails, STOP and tell the user exactly which command
-to run instead. Do **not** start charter/PRD/slicing yourself — those need a human.
+to run instead. Do **not** start charter/spec/slicing yourself — those need a human.
 
 1. Workspace healthy: `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 2. A charter exists: `.kuru/charter.md` is present and filled in (not the empty
    template). If missing/empty → STOP, point to `/kuru:charter`.
-3. At least one PRD exists under `.kuru/prd/`. If none → STOP, point to `/kuru:prd`.
+3. At least one spec exists under `.kuru/spec/`. If none → STOP, point to `/kuru:spec`.
 4. Slices exist and are **contracted**:
    - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls` shows ≥1 slice.
    - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status draft` shows

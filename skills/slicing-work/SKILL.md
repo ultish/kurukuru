@@ -1,9 +1,9 @@
 ---
 name: slicing-work
-description: Use when decomposing a PRD into vertical slices sized for a single agent session. Covers the small-enough/complete-enough tension, vertical (not horizontal) slicing, frozen contracts, sequencing for a walking skeleton, and writing checkable acceptance criteria. This is the highest-leverage step in the harness.
+description: Use when decomposing a spec into vertical slices sized for a single agent session. Covers the small-enough/complete-enough tension, vertical (not horizontal) slicing, frozen contracts, sequencing for a walking skeleton, and writing checkable acceptance criteria. This is the highest-leverage step in the harness.
 ---
 
-# Slicing a PRD into vertical slices
+# Slicing a spec into vertical slices
 
 A slice is the unit of work a builder agent picks up and finishes in **one
 session**. Getting slice boundaries right is the highest-leverage decision in the
@@ -13,10 +13,10 @@ satisfy **two opposing constraints at once**.
 
 ## Precondition: no open questions
 
-Before you cut a single slice, confirm the charter's and the PRD's **Open
+Before you cut a single slice, confirm the charter's and the spec's **Open
 questions** are resolved (answered inline, or explicitly `DEFERRED (non-blocking)`
 with the user's agreement). If any blocking question remains, **stop and resolve it
-with the user first**, then update the charter/PRD. Slicing freezes the PRD into
+with the user first**, then update the charter/spec. Slicing freezes the spec into
 contracts; an unanswered question becomes a guess locked inside one. Resolving it
 later means re-`draft`ing slices — the drift this harness exists to prevent.
 
@@ -39,7 +39,7 @@ later means re-`draft`ing slices — the drift this harness exists to prevent.
   app in a non-shippable in-between state.
 - **Carries its context inline.** `slice.md` must give the builder the files to
   touch, the existing pattern to follow, the data/API contract, and links to the
-  PRD section — so the builder never reverse-engineers intent. A slice that
+  spec section — so the builder never reverse-engineers intent. A slice that
   assumes the builder "just knows" will drift.
 - **Independently verifiable.** Each acceptance criterion is a **checkable fact**,
   not a quality adjective. If you cannot write a concrete AC for a slice, the
@@ -150,13 +150,13 @@ this harness exists to prevent.
 If `config.json` defines multiple gate targets — one per app/build flavor in the
 repo (a gradle service, a pnpm web app) — each slice must say which one it builds,
 because that decides **which gates run and in which directory**. You know this up
-front: the charter defined the targets and the PRD says which app each piece of
+front: the charter defined the targets and the spec says which app each piece of
 work touches. Pass it at creation: `kuru new-slice "<title>" --target web` (or fix
 later with `kuru set-target <id> <name>`). A slice that forgets its target is caught
 by `kuru doctor` and can't be gated. Single-target repos ignore this entirely.
 
 ## Worked example
-PRD: "Users can save and revisit search filters."
+spec: "Users can save and revisit search filters."
 
 Cut into vertical, session-sized slices:
 1. **SL — Save a filter (walking skeleton).** Migration for `saved_filters` +

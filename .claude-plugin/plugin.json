@@ -1,7 +1,7 @@
 {
   "name": "kuru",
-  "version": "1.9.0",
-  "description": "Enterprise delivery harness: charter -> PRD -> vertical slices -> build -> independent verification -> review, with deterministic gates and file-based handoffs for long-running coding agents.",
+  "version": "2.0.0",
+  "description": "Enterprise delivery harness: charter -> spec -> vertical slices -> build -> independent verification -> review, with deterministic gates and file-based handoffs for long-running coding agents.",
   "author": { "name": "kuru" },
-  "keywords": ["harness", "agents", "prd", "verification", "enterprise", "workflow"]
+  "keywords": ["harness", "agents", "spec", "verification", "enterprise", "workflow"]
 }

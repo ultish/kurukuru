@@ -30,12 +30,12 @@ narrated — there is no board pick to drift onto.
 ## Preconditions — refuse to start unless ALL hold
 
 Run these first; if any fails, STOP and tell the user exactly which command to run
-instead. Do **not** start charter/PRD/slicing yourself — those need a human.
+instead. Do **not** start charter/spec/slicing yourself — those need a human.
 
 1. Workspace healthy: `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
 2. A charter exists: `.kuru/charter.md` present and filled in (not the empty template).
    If missing/empty → STOP, point to `/kuru:charter`.
-3. At least one PRD exists under `.kuru/prd/`. If none → STOP, point to `/kuru:prd`.
+3. At least one spec exists under `.kuru/spec/`. If none → STOP, point to `/kuru:spec`.
 4. The named slice is **actionable**. Run
    `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next --slice <id> --json`
    and read the result (unlike `/kuru:loop`, **other** slices may still be `draft` — only

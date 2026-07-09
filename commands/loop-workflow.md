@@ -12,7 +12,7 @@ orchestration script, the user approves it, and the workflow runtime runs each s
 isolated `agent()`. That per-step clean context is the point — it's why this can clear a large
 board without the orchestrator's context degrading, and why it supersedes `runner.py`.
 
-The judgment-heavy phases (`/kuru:charter`, `/kuru:prd`, `/kuru:slice`) are still done by a human
+The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are still done by a human
 first; this only loops the deterministic part. **Code review is opt-in** — a verified slice ships
 straight to `done`; run `/kuru:review <id>` by hand on slices that warrant it.
 
@@ -88,13 +88,13 @@ budget. Do not read the lifetime `rejections` from `show`.
 ## Preconditions — refuse to author/launch unless ALL hold
 
 Run these first; if any fails, STOP and tell the user exactly which command to run instead. Do
-**not** start charter/PRD/slicing yourself — those need a human.
+**not** start charter/spec/slicing yourself — those need a human.
 
 1. Workspace healthy: `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor`.
    (Target-dir *warnings* for not-yet-built slices don't block; a hard ✗ does.)
 2. A charter exists: `.kuru/charter.md` present and filled in (not the empty template) → else
    STOP, point to `/kuru:charter`.
-3. At least one PRD exists under `.kuru/prd/` → else STOP, point to `/kuru:prd`.
+3. At least one spec exists under `.kuru/spec/` → else STOP, point to `/kuru:spec`.
 4. **Whole-board mode only:** no `draft` slices remain
    (`python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status draft` is empty). A
    `draft` still needs human slicing/contracting → else STOP, point to `/kuru:slice`. In

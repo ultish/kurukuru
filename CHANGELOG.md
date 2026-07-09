@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-09
+
+### Added
+- **`reviewing-a-slice` skill** — the opt-in `review` step finally has a companion
+  skill (the odd one out; build/verify/check-contract already had theirs). It gives
+  the reviewer a standards-source hierarchy — repo conventions (charter *Required
+  tooling / conventions* + `profile.conventions`) win, anything the gates already
+  enforce is skipped, and Fowler's *Refactoring* ch. 3 code smells serve as the
+  citable fallback baseline — plus the framing that review is the *quality axis*
+  (verify already settled the *spec axis*) and the reviewed-vs-reject verdict rule.
+  `commands/review.md` is slimmed to point at it; listed in `README.md` and the
+  `kuru-method` skill.
+
+### Changed
+- **BREAKING: renamed the PRD phase to "spec" throughout.** The `/kuru:prd` command is now
+  `/kuru:spec`, the `writing-prds` skill is now `writing-specs`, the workspace directory
+  `.kuru/prd/` is now `.kuru/spec/`, and the auto-numbered file stem / epic tag `prd-N` is now
+  `spec-N`. The engine (`kuru.py init`) and `runner.py` preconditions create/read `.kuru/spec/`
+  instead of `.kuru/prd/`. All command/agent/skill/template prose and the `README.md` pipeline
+  diagrams say "spec" in place of "PRD". Nothing in `kuru.py` reads the id for logic (it stays a
+  display-only opaque handle), so the state machine and gate engine are unchanged.
+
+  **Migration for existing `.kuru/` workspaces:** `git mv .kuru/prd .kuru/spec` and, optionally,
+  rename `prd-N.md` → `spec-N.md`. Slices already carry their epic tag (`prd-N`) as a stored
+  string in `ledger.json`; it is display-only, so leaving old `prd-N` tags in place is harmless,
+  though new slices will be tagged `spec-N`.
+
 ## [1.9.0] - 2026-07-08
 
 ### Added

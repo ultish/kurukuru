@@ -10,7 +10,7 @@ repo, tell the user and offer to run:
 `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" init`
 
 Then run a **discovery conversation** with the user to build shared understanding
-BEFORE any PRD. Focus: $ARGUMENTS
+BEFORE any spec. Focus: $ARGUMENTS
 
 **How to ask:** whenever you have more than one question, use the interactive
 `AskUserQuestion` UI (batch up to 4 related questions per call) rather than a wall
@@ -180,8 +180,8 @@ cheapest place to catch ambiguity. Before you finish, review the **Open question
 section and, for each one, **ask the user** (use `AskUserQuestion` for discrete
 choices). Fold every answer back into the relevant charter section and remove it
 from Open questions. Only items the user *explicitly* chooses to defer may remain —
-mark each as `DEFERRED (non-blocking): <why>`. A charter should not advance to a PRD
+mark each as `DEFERRED (non-blocking): <why>`. A charter should not advance to a spec
 with unresolved questions that would change scope.
 
 Then summarize the shared understanding back to the user and point them to
-`/kuru:prd <feature>` as the next step.
+`/kuru:spec <feature>` as the next step.

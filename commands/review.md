@@ -3,7 +3,7 @@ description: Optionally code-review a verified slice and mark it reviewed. Revie
 argument-hint: "[slice-id]"
 ---
 
-Use the `kuru-method` skill for context.
+Use the `reviewing-a-slice` skill for methodology (and `kuru-method` for context).
 
 **Code review is opt-in.** A verified slice may ship straight to `done` (that's
 what `/kuru:loop` does); run this command by hand on the slices that warrant a
@@ -18,11 +18,14 @@ process:
 `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" set-status <id> done` — and stop here.
 (Marking a slice `done` auto-commits the working tree as one slice-sized commit.)
 
-A `verified` slice reaches here after independent verification. Run the project's
-code review on this slice's diff at high effort — invoke `/code-review high` (or
-the repo's review skill) scoped to the files the slice touched (see its
-`build-log.md`). Focus on correctness, security, and maintainability, not style
-nits the linters already cover.
+A `verified` slice reaches here after independent verification — the spec axis is
+already settled, so review is the **quality axis** (see `reviewing-a-slice` for the
+standards-source hierarchy and the code-smell baseline). Run the project's code
+review on this slice's diff at high effort — invoke `/code-review high` (or the
+repo's review skill) scoped to the files the slice touched (see its `build-log.md`).
+Apply the repo's documented conventions first, skip anything the gates already
+enforce, and reserve findings for design, naming, duplication, correctness, and
+security.
 
 Summarize findings for the user. If the review is clean (or findings are
 addressed), set:

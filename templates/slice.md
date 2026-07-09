@@ -32,7 +32,7 @@ describe it, consider whether it's two slices. -->
     encodes the air-gap mirror/catalog/plugins, and hand-written versions fail the
     offline build gate." Do NOT rely on this alone — the matching AC must be the
     checkable artifact, so a builder that ignores the skill still gets caught.
-  - Links to the relevant PRD section and any prior slice it builds on.
+  - Links to the relevant spec section and any prior slice it builds on.
 A builder should not have to reverse-engineer intent from this section. -->
 
 ## In scope

@@ -4,7 +4,7 @@ An enterprise delivery harness for coding agents (Claude Code plugin). It turns 
 coding agent into a disciplined pipeline for shipping **production** software
 across many sessions — not vibe-coding, not hobby projects.
 
-Shared understanding becomes a PRD; the PRD becomes **vertical slices** that are
+Shared understanding becomes a spec; the spec becomes **vertical slices** that are
 small enough for one agent session yet complete enough to build without guessing;
 a builder agent implements one slice; a **separate** verifier agent gatekeeps it
 against a **frozen contract** with concrete evidence and deterministic gates;
@@ -97,8 +97,8 @@ Then, in Claude Code:
 
 ```
 /kuru:charter            # build shared understanding -> .kuru/charter.md
-/kuru:prd [topic]        # charter -> .kuru/prd/prd-N.md  (auto-numbered; kuru-planner)
-/kuru:slice prd-N        # PRD -> vertical slices with frozen contracts (epic tag = prd-N)
+/kuru:spec [topic]       # charter -> .kuru/spec/spec-N.md  (auto-numbered; kuru-planner)
+/kuru:slice spec-N       # spec -> vertical slices with frozen contracts (epic tag = spec-N)
 /kuru:check-contract     # OPTIONAL pre-build: is a slice's contract satisfiable + verifiable here?
 /kuru:build              # kuru-builder implements the next ready slice -> built
 /kuru:verify             # kuru-verifier independently gatekeeps -> verified|rejected
@@ -142,7 +142,7 @@ slice's try tally, so the cap governs only the current run. A **try** is one ful
 `blocked`) is retried with a fresh agent just like a verify rejection, up to `max-tries`.
 A slice already blocked before the run is left for a human, not auto-retried.
 
-Both refuse to start until charter + PRD + non-draft (contracted) slices exist,
+Both refuse to start until charter + spec + non-draft (contracted) slices exist,
 spawn a fresh builder and a separate verifier per slice, respect inter-slice
 **dependencies**, and stop on a slice blocked at start or after a slice exhausts its
 `max-tries` build→verify budget. The manual `/kuru:*` commands still work alongside either.
@@ -275,7 +275,7 @@ engine's gate/role/dependency rules still gate every transition.
    plugin into a headless `claude -p` session and confirms a `/kuru:*` command
    resolves.
 3. **Get a target repo to the loopable point** with the manual commands:
-   `/kuru:charter` → `/kuru:prd` → `/kuru:slice` (these need a human). Now every
+   `/kuru:charter` → `/kuru:spec` → `/kuru:slice` (these need a human). Now every
    slice has a frozen contract.
 4. **Run the loop:**
 
@@ -374,9 +374,9 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter prd slice check-contract build verify review ship status next bearings loop loop-slice loop-workflow
+├── commands/        init charter spec slice check-contract build verify review ship status next bearings loop loop-slice loop-workflow
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier  kuru-contract-critic
-├── skills/          kuru-method writing-prds slicing-work checking-a-contract building-a-slice verifying-a-slice loop-workflow
+├── skills/          kuru-method writing-specs slicing-work checking-a-contract building-a-slice verifying-a-slice reviewing-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
 ├── scripts/selftest.sh  regression test for the engine's guarantees
 ├── scripts/smoke-headless.sh  proves /kuru:* resolves in a headless `claude -p` session
@@ -393,7 +393,7 @@ The `.kuru/` workspace (per target repo, created by `kuru init`):
 ```
 .kuru/
 ├── config.json   ledger.json   charter.md   progress.md   init.sh
-├── prd/prd-N.md
+├── spec/spec-N.md
 └── slices/<id>/  slice.md  contract.yml  build-log.md  verification.md  gate-results.json
 ```
 
@@ -432,8 +432,8 @@ depends_on:
 exposes:
   - /kuru:init        — scaffold a .kuru/ workspace in the target repo
   - /kuru:charter     — discovery session → charter.md
-  - /kuru:prd         — charter → PRD via kuru-planner
-  - /kuru:slice       — PRD → vertical slices with frozen contracts
+  - /kuru:spec        — charter → spec via kuru-planner
+  - /kuru:slice       — spec → vertical slices with frozen contracts
   - /kuru:check-contract — optional pre-build: kuru-contract-critic flags an unsatisfiable/unverifiable contract
   - /kuru:build       — kuru-builder implements the next ready slice
   - /kuru:verify      — kuru-verifier independently gatekeeps a built slice

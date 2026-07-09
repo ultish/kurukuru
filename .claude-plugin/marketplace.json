@@ -1,16 +1,16 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "kuru",
-  "version": "1.9.0",
-  "description": "Enterprise delivery harness for coding agents: charter → PRD → vertical slices → build → independent verification → review. Deterministic gates, frozen contracts, and file-based handoffs for production-quality software across long-running agent sessions.",
+  "version": "2.0.0",
+  "description": "Enterprise delivery harness for coding agents: charter → spec → vertical slices → build → independent verification → review. Deterministic gates, frozen contracts, and file-based handoffs for production-quality software across long-running agent sessions.",
   "owner": {
     "name": "kuru"
   },
   "plugins": [
     {
       "name": "kuru",
-      "description": "Enterprise delivery harness: charter → PRD → vertical slices → build → independent verification → review, with deterministic gates and file-based handoffs for long-running coding agents.",
-      "version": "1.9.0",
+      "description": "Enterprise delivery harness: charter → spec → vertical slices → build → independent verification → review, with deterministic gates and file-based handoffs for long-running coding agents.",
+      "version": "2.0.0",
       "author": {
         "name": "kuru"
       },

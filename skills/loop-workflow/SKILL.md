@@ -186,7 +186,7 @@ STOP and name the command to run:
 
 1. `kuru doctor` reports healthy (a hard ✗ blocks; target-dir *warnings* don't).
 2. `.kuru/charter.md` exists and is filled in → else `/kuru:charter`.
-3. At least one PRD under `.kuru/prd/` → else `/kuru:prd`.
+3. At least one spec under `.kuru/spec/` → else `/kuru:spec`.
 4. **Whole-board mode:** no `draft` slices remain (`kuru ls --status draft` is empty) → else
    `/kuru:slice`. **Scoped mode** (`/kuru:loop-workflow SL-0002` or `SL-0001,SL-0002,SL-0011`):
    only the named slices and their deps must be contracted — run `kuru next --slice <id> --json`

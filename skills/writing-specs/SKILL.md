@@ -1,17 +1,17 @@
 ---
-name: writing-prds
-description: Use when turning a charter into a PRD for an enterprise feature or epic. Covers problem framing, measurable success, non-goals, functional and non-functional (production) requirements, and the acceptance shape that slicing will turn into per-slice criteria.
+name: writing-specs
+description: Use when turning a charter into a spec for an enterprise feature or epic. Covers problem framing, measurable success, non-goals, functional and non-functional (production) requirements, and the acceptance shape that slicing will turn into per-slice criteria.
 ---
 
-# Writing a PRD
+# Writing a spec
 
-A Kurukuru PRD turns the shared understanding in `.kuru/charter.md` into a concrete
+A Kurukuru spec turns the shared understanding in `.kuru/charter.md` into a concrete
 specification of **what** to build and **why** — never **how**. It is the input
 to slicing. Write it for production: a feature that "works on the happy path" is
 not done.
 
 ## Start from the charter, never a blank page
-Read `.kuru/charter.md` first. The PRD must trace back to the charter's problem,
+Read `.kuru/charter.md` first. The spec must trace back to the charter's problem,
 users, and success metrics. If the charter doesn't support a requirement, it
 doesn't belong here yet — raise it as an open question, don't invent scope.
 
@@ -53,15 +53,15 @@ doesn't belong here yet — raise it as an open question, don't invent scope.
   (APIs, schemas) precisely, because those cross slice boundaries.
 - Every requirement should be falsifiable. If you can't imagine the evidence that
   would prove it done, rewrite it until you can.
-- Surface unknowns as **Open questions** with an owner. A PRD full of confident
+- Surface unknowns as **Open questions** with an owner. A spec full of confident
   guesses is worse than one honest about what's undecided.
 - **Open questions are a gate, not a footnote.** Anything that could change scope
   must be resolved *with the user* before slicing — ask, then fold the answer back
-  into the PRD (and the charter if it's a charter-level gap) and clear the question.
-  Slicing turns the PRD into frozen contracts, so an unanswered question there
+  into the spec (and the charter if it's a charter-level gap) and clear the question.
+  Slicing turns the spec into frozen contracts, so an unanswered question there
   becomes a guess baked into a contract. Only questions the user explicitly agrees
   are non-blocking may carry forward, marked `DEFERRED (non-blocking)`.
 
-Write the PRD to `.kuru/prd/<id>.md` — the file is **auto-numbered** `prd-N` (the
-`/kuru:prd` command assigns the next sequential id; you never name it). That id is
-also the epic tag every slice under this PRD carries.
+Write the spec to `.kuru/spec/<id>.md` — the file is **auto-numbered** `spec-N` (the
+`/kuru:spec` command assigns the next sequential id; you never name it). That id is
+also the epic tag every slice under this spec carries.

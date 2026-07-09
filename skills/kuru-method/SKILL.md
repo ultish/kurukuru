@@ -16,17 +16,17 @@ narration.
 
 ```mermaid
 flowchart LR
-    charter --> prd --> slice --> check[check-contract] --> build --> verify --> done
+    charter --> spec --> slice --> check[check-contract] --> build --> verify --> done
     check -. flagged: re-slice .-> slice
     verify -. opt-in .-> review --> done
 ```
 
 - **charter** — shared understanding with the humans. Problem, users, success
   metrics, constraints, non-goals. (`/kuru:charter`)
-- **prd** — charter becomes a PRD per feature/epic: what & why, functional and
-  **non-functional** requirements, acceptance shape. (`/kuru:prd`, skill
-  `writing-prds`)
-- **slice** — a PRD becomes **vertical slices**: each small enough for one
+- **spec** — charter becomes a spec per feature/epic: what & why, functional and
+  **non-functional** requirements, acceptance shape. (`/kuru:spec`, skill
+  `writing-specs`)
+- **slice** — a spec becomes **vertical slices**: each small enough for one
   session's context, complete enough to build without guessing, with a **frozen
   contract**. (`/kuru:slice`, skill `slicing-work`)
 - **check-contract** *(advisory, pre-build)* — the `kuru-contract-critic` subagent
@@ -41,8 +41,10 @@ flowchart LR
 - **verify** — a SEPARATE `kuru-verifier` subagent gatekeeps against the frozen
   contract with concrete evidence. (`/kuru:verify`, skill `verifying-a-slice`)
 - **review** *(opt-in)* — code review on the diff for slices that warrant a closer
-  look. Not a required step: a verified slice ships straight to `done`, and the
-  loop never runs review. (`/kuru:review`)
+  look. The quality axis (verify already settled the spec axis): repo conventions
+  first, skip what the gates enforce, Fowler's smells as the baseline. Not a required
+  step: a verified slice ships straight to `done`, and the loop never runs review.
+  (`/kuru:review`, skill `reviewing-a-slice`)
 - **ship** — the terminal transition: a `verified` (or `reviewed`) slice → `done`, which
   auto-commits the working tree. Humans can run `set-status <id> done` directly;
   `/kuru:ship <id>` is the thin command wrapper an automated driver (`/kuru:loop-workflow`)
@@ -50,10 +52,10 @@ flowchart LR
   but skips the commit (the parallel driver ships many slices into one tree, then commits
   once after the run).
 
-**Open questions gate the move from charter → PRD → slice.** Ambiguity is cheapest
-to catch at the charter, and must be resolved at the latest in the PRD — *with the
+**Open questions gate the move from charter → spec → slice.** Ambiguity is cheapest
+to catch at the charter, and must be resolved at the latest in the spec — *with the
 user*, folding answers back into the doc. Never start slicing while a blocking open
-question is unresolved; slicing freezes the PRD into contracts, so an unanswered
+question is unresolved; slicing freezes the spec into contracts, so an unanswered
 question becomes a guess locked inside one.
 
 The first three phases need a human. Once every slice has a frozen contract, the
@@ -61,7 +63,7 @@ build → verify → done cycle is mechanical and can be driven
 automatically by `/kuru:loop` (optional) — it acts on `kuru next` in order,
 spawning a fresh builder and a **separate** verifier per slice, and stops on any
 `blocked` slice, a `draft` (uncontracted) slice, or repeated rejection. It never
-runs charter/PRD/slicing for you. To ship a **single** named slice and stop there,
+runs charter/spec/slicing for you. To ship a **single** named slice and stop there,
 use `/kuru:loop-slice <id>`, which drives only that slice via `kuru next --slice
 <id>` (so it can't drift onto a ready sibling the board would rank first). To work
 **several independent slices in parallel**, use `/kuru:loop-workflow` — it authors a
@@ -157,7 +159,7 @@ Four rules are enforced **in code** — you cannot talk your way past them:
 | `.kuru/ledger.json` | **machine** — slices + status + history | `kuru.py` only |
 | `.kuru/slices/<id>/gate-results.json` | **machine** — gate pass/fail | `kuru gate` |
 | `.kuru/charter.md` | narrative | charter session |
-| `.kuru/prd/prd-N.md` (auto-numbered) | narrative | planner |
+| `.kuru/spec/spec-N.md` (auto-numbered) | narrative | planner |
 | `.kuru/slices/<id>/slice.md` | narrative spec | slicer |
 | `.kuru/slices/<id>/contract.yml` | narrative, **frozen at `ready`** | slicer |
 | `.kuru/slices/<id>/build-log.md` | narrative | builder |

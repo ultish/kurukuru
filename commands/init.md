@@ -58,7 +58,7 @@ It does **not** ask discovery questions; that is `/kuru:charter`'s job.
    - If a profile was loaded: "Run `/kuru:charter` — it will pre-fill from your
      profile, confirm the values, then write the authoritative `config.json`."
    - If a `--stack` was given but no profile: "Run `/kuru:charter` to tailor the
-     gate commands to this repo, then `/kuru:prd <feature>` to start your first
+     gate commands to this repo, then `/kuru:spec <feature>` to start your first
      feature."
    - Otherwise: "Run `/kuru:charter` to set up the technical environment and write
      the first charter."

@@ -33,9 +33,9 @@ a failed *build* (the builder gives up -> `blocked`) counts and is retried with 
 fresh process just like a verify rejection — up to `--max-tries` per slice, per run.
 Only a slice already blocked before the run began is left for a human untouched.
 
-Preconditions: charter + PRD + frozen (non-draft) slices must already exist (in
+Preconditions: charter + spec + frozen (non-draft) slices must already exist (in
 `--slice` mode, only the named slice and its dependencies need contracts). The
-runner refuses to start charter/PRD/slicing — those need a human.
+runner refuses to start charter/spec/slicing — those need a human.
 
 Requires: python3 (stdlib only) and the `claude` CLI. No third-party deps.
 """
@@ -134,8 +134,8 @@ class Runner:
         charter = kd / "charter.md"
         if not charter.exists() or charter.stat().st_size < 50:
             return "charter missing/empty — run /kuru:charter (needs a human)."
-        if not any((kd / "prd").glob("*.md")):
-            return "no PRD under .kuru/prd/ — run /kuru:prd (needs a human)."
+        if not any((kd / "spec").glob("*.md")):
+            return "no spec under .kuru/spec/ — run /kuru:spec (needs a human)."
         slices = self.kuru_json("ls", "--json")
         if not slices:
             return "no slices — run /kuru:slice (needs a human)."
