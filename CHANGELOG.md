@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-10
+
+### Changed
+- **`/kuru:loop` now takes an optional `slice-id`; `/kuru:loop-slice` is removed.** Passing a
+  single slice id — `/kuru:loop SL-0003` (or `/kuru:loop SL-0003 5` with a try cap) — drives
+  **only that slice** to `done` and stops, the exact behavior the dedicated `loop-slice` command
+  provided. Scoped mode asks the engine **`kuru next --slice <id>`** every iteration, so the
+  "only this slice" guarantee stays machine-checked in `kuru.py` (no board pick to drift onto);
+  its preconditions are looser than whole-board mode (only the named slice and its deps must be
+  contracted — other slices may still be `draft`). Omit the id for the whole-board loop (the
+  default, unchanged). **Migration:** replace `/kuru:loop-slice <id>` with `/kuru:loop <id>`;
+  `runner.py --slice <id>` is unchanged. A curated **set** of slices (with parallelism across
+  gate targets) remains the job of `/kuru:loop-workflow`.
+
 ## [2.1.0] - 2026-07-09
 
 ### Added

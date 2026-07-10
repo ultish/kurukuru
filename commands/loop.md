@@ -1,6 +1,6 @@
 ---
-description: Autonomously run the build→verify→review→ship loop over ready slices until the board is clear (review runs when the workspace has it on — the default; toggle with `kuru set-review`). Requires charter + spec + frozen slices to already exist.
-argument-hint: "[max-tries, default 2]"
+description: Autonomously run the build→verify→review→ship loop over ready slices until the board is clear — or, given a slice id, drive just that one slice to done and stop (review runs when the workspace has it on — the default; toggle with `kuru set-review`). Requires charter + spec + frozen slices to already exist.
+argument-hint: "[slice-id] [max-tries, default 2]"
 ---
 
 Use the `kuru-method` skill for context.
@@ -16,18 +16,26 @@ straight to `done`). Which one applies is decided by the engine: **act on the `a
 `kuru next` returns** (`review` vs `ship`). The manual `/kuru:*` commands still work —
 this just runs them for you, in `kuru next` order, until there is nothing left to do.
 
-`max-tries` (from `$ARGUMENTS`, default **2**) caps how many **build→verify(→review)
-tries** a single slice gets **in this run** before the loop stops and asks for a human.
-One try is one full `build → verify → review` cycle (just `build → verify` when review is
-off); **any** failed cycle — a verify rejection, a **review rejection**, a build that goes
-`blocked` (the builder gave up / gates stayed red), or a verify that records no verdict —
-consumes a try and is retried with a **fresh** subagent. The budget is **per run**:
-re-running `/kuru:loop` resets every slice's tally to 0, so the cap governs only the
-current run — not the slice's lifetime.
+## Arguments (`$ARGUMENTS`)
 
-To drive **one specific slice** to `done` and stop there (instead of clearing the whole
-board), use **`/kuru:loop-slice <id>`**. To work several independent slices **in
-parallel** in one workflow, use **`/kuru:loop-workflow`**.
+Parse up to two tokens, in any order:
+
+- An optional **slice id** (`SL-####`, case-insensitive, e.g. `SL-0003`) → **scoped mode**:
+  drive **only that one slice** to `done`, then stop, instead of clearing the whole board. In
+  scoped mode the loop asks the engine **`kuru next --slice <id>`** every iteration — the next
+  action for *that one slice only* — so it can never drift onto a ready sibling the board would
+  rank first; the "only this slice" guarantee is machine-checked in `kuru.py`, not narrated. Omit
+  the id to drive the **whole board** (the default).
+- A bare **integer** → **`max-tries`** (default **2**): how many **build→verify(→review) tries**
+  a slice gets **in this run** before the loop stops and asks for a human. One try is one full
+  `build → verify → review` cycle (just `build → verify` when review is off); **any** failed cycle
+  — a verify rejection, a **review rejection**, a build that goes `blocked` (the builder gave up /
+  gates stayed red), or a verify that records no verdict — consumes a try and is retried with a
+  **fresh** subagent. The budget is **per run**: re-running `/kuru:loop` resets every slice's tally
+  to 0, so the cap governs only the current run — not the slice's lifetime.
+
+So: `/kuru:loop` · `/kuru:loop 5` · `/kuru:loop SL-0003` · `/kuru:loop SL-0003 5`. To work
+several independent slices **in parallel** in one workflow, use **`/kuru:loop-workflow`**.
 
 ## Preconditions — refuse to start unless ALL hold
 
@@ -40,19 +48,36 @@ to run instead. Do **not** start charter/spec/slicing yourself — those need a 
 3. At least one spec exists under `.kuru/spec/`. If none → STOP, point to `/kuru:spec`.
 4. Slices exist and are **contracted**:
    - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls` shows ≥1 slice.
-   - `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status draft` shows
+   - **Whole-board mode (no slice id):**
+     `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls --status draft` shows
      **none**. A `draft` slice still needs human slicing/contracting → STOP and
      point to `/kuru:slice` to finish (and freeze) it first.
+   - **Scoped mode (a slice id given):** only the named slice and its dependencies must be
+     contracted — other slices may still be `draft`. Run
+     `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next --slice <id> --json` and
+     read it:
+     - missing id → the command errors; STOP and report the typo.
+     - `next_action: "slice"` (the slice is `draft`) → STOP; a human must slice/contract it first
+       (`/kuru:slice`). This loop never creates contracts.
+     - `reason: "waiting_on_deps"` → STOP; its `depends_on` aren't all `done`. Tell the user to
+       finish those first (e.g. `/kuru:loop <dep>` each, or `/kuru:loop`).
+     - `reason: "blocked"` → STOP; the slice is `blocked` and needs a human.
+     - `reason: "done"` → nothing to do; report it already shipped.
 
 ## The loop
 
-Repeat until a stop condition fires:
+Repeat until a stop condition fires. **In scoped mode, everywhere below replace `kuru next`
+with `kuru next --slice <id>` and act only on what it returns for the named slice** — the moment
+that slice reaches `done` you go to **Termination** (you never touch another slice).
 
 1. Re-derive state from files (do not trust earlier chat): run
-   `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next` (it already skips
-   dependency-blocked slices, so just act on what it returns). For an unattended
-   run outside Claude, use the top-level `runner.py` instead — same logic in plain Python.
-2. If it prints **"No actionable slices"** → go to **Termination**.
+   `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next` — or, in scoped mode,
+   `... next --slice <id>` (both already skip dependency-blocked slices, so just act on what is
+   returned). For an unattended run outside Claude, use the top-level `runner.py` (or
+   `runner.py --slice <id>`) instead — same logic in plain Python.
+2. If it prints **"No actionable slices"** (board mode), or returns `next_action: "none"` with
+   `reason: "done"` (scoped mode — the slice shipped) → go to **Termination**. In scoped mode a
+   `"none"` with `reason: "blocked"`/`"waiting_on_deps"` → STOP and surface it (see Preconditions).
 3. If the next slice is in status `draft` → STOP (a human must slice/contract it;
    point to `/kuru:slice`). The loop never creates contracts.
 4. Otherwise act on its status, using the **same behavior as the matching command**:
@@ -142,8 +167,11 @@ planner does the repair, the engine records the `draft→ready` transitions.
 Stop when any of these is true; in every case, **update `.kuru/progress.md`** (current
 state, what the loop did, the single next action) before reporting:
 
-- `kuru next` reports no actionable slices **and** `ls --status blocked` is empty →
-  success: every slice is `done`. Summarize the run.
+- **Whole-board mode:** `kuru next` reports no actionable slices **and** `ls --status blocked`
+  is empty → success: every slice is `done`. Summarize the run.
+- **Scoped mode:** the named slice reached `done` → success. Report that it shipped, and what
+  `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next` would pick up next, so the
+  user can re-run (`/kuru:loop <next>` or `/kuru:loop`) when ready.
 - A slice is `blocked`, or the retry cap was hit, or a `draft`/contract gap
   appeared → STOP and tell the user exactly what needs a human and which command to
   run.

@@ -114,7 +114,7 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
 - **In-session (sequential):** `/kuru:loop` runs build → verify → review → ship over the ready
   slices, one at a time, until the board is clear (review runs when the workspace has it on — the
   `kuru init` default; a review rejection rebuilds like a verify rejection). To ship just **one**
-  named slice and stop there, use `/kuru:loop-slice <id>` (or `runner.py --slice <id>`).
+  named slice and stop there, pass its id: `/kuru:loop <id>` (or `runner.py --slice <id>`).
 - **Dynamic workflow (per-slice pipelines):** `/kuru:loop-workflow` runs the same build →
   verify → review → ship cycle, but it authors a Claude Code **dynamic workflow** — a JavaScript script
   you approve, which the workflow runtime runs in the background. It asks the engine
@@ -380,7 +380,7 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter spec slice check-contract build verify review ship status next bearings loop loop-slice loop-workflow
+├── commands/        init charter spec slice check-contract build verify review ship status next bearings loop loop-workflow
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier  kuru-contract-critic
 ├── skills/          kuru-method writing-specs slicing-work checking-a-contract building-a-slice verifying-a-slice reviewing-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
@@ -445,8 +445,7 @@ exposes:
   - /kuru:verify      — kuru-verifier independently gatekeeps a built slice
   - /kuru:review      — code review before marking done (on by default; kuru set-review to toggle)
   - /kuru:ship        — mark a verified/reviewed slice done (auto-commits)
-  - /kuru:loop          — autonomous build→verify→review→ship loop over all ready slices (sequential)
-  - /kuru:loop-slice    — same loop scoped to a single named slice
+  - /kuru:loop          — autonomous build→verify→review→ship loop over all ready slices (sequential); pass a slice id to scope it to one slice and stop
   - /kuru:loop-workflow — parallel build→verify→review→ship over all ready slices, as a dynamic workflow
   - /kuru:next        — print and start the next actionable slice
   - /kuru:status      — delivery dashboard
