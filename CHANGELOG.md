@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-11
+
 ### Removed
 - **Python hierarchical board UI (`--ui board`).** Interactive board is Ratatui only
   (`scripts/board-tui.sh` / `kuru-board-tui`). Removed `board/ui/board.py`,
   `board/ui/viewmodel.py`, and `board/ui/test_viewmodel.py`. `python3 -m board run`
   supports `--ui plain` (default, streaming logs) and `--ui json` only. The TUI still
   spawns `board run --ui plain` and tails `events.ndjson`.
+- **`impl/BOARD_RUNNER_PLAN.md`** — plan fulfilled; design lives in `board/`, `tui/`,
+  and `tui/README.md`.
 
 ### Changed
 - **`scripts/` layout:** production tooling stays at the top level (`kuru.py`,
@@ -23,9 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **RHEL 9 TUI release build:** `tui/Dockerfile.rhel9` (Rocky 9 / glibc-matched,
-  `x86_64-unknown-linux-gnu` only) and `scripts/build-tui-rhel9.sh` →
-  `dist/kuru-board-tui-x86_64-unknown-linux-gnu` + `SHA256SUMS` for GitHub Release
-  attach. Guide: `docs/airgap-tui.md`. macOS continues to build from source.
+  `x86_64-unknown-linux-gnu` target) and `scripts/build-tui-rhel9.sh` →
+  `dist/kuru-board-tui-linux-amd64.tar.gz` (+ bare `dist/kuru-board-tui-linux-amd64`,
+  `dist/SHA256SUMS`) for GitHub Release attach. Guide: `docs/airgap-tui.md`,
+  `tui/README.md`. macOS continues to build from source. Smoke:
+  `scripts/test/smoke-tui-linux-amd64.sh`.
 - **`.kuru/BOARD_HANDOFF.md`** — agent-tab briefing (orient ritual + latest board run).
   Seeded by `kuru init` from `templates/board-handoff.md`; rewritten after each
   `board run`. `progress.md` / bearings point at it.
@@ -36,57 +42,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ratatui board TUI** (`tui/`): master–detail UI (left slices / right detail+log)
   using Ratatui 0.29 + Crossterm 0.28. Binary `kuru-board-tui`; launcher
   `scripts/board-tui.sh`. Tails `.kuru/runs/*/events.ndjson` while Python
-  `board run` orchestrates. `--dump` for non-TTY text snapshot.
-- **TUI control plane:** start/stop board runs from the TUI, backend picker, review
-  toggle, and modal help — no embedded PTY.
-  - Keys: `s` start (confirm) · `S`/`x` stop process group · `b` backend picker ·
-    `B` cycle backend · `R` toggle `kuru set-review` · `?` help · Esc closes modal
-    then leaves slice (never quits; `q` quits).
-  - Start spawns `python3 -m board run -y --ui plain --backend …` with
-    `PYTHONPATH` / `KURU_PY` / `CLAUDE_PLUGIN_ROOT`, then follows the new
-    `.kuru/runs/r_*` events. Header shows idle | running (pid) | finished.
-  - CLI: `--plugin-dir`, `--backend`, `--kuru-py`, `--max-tries`, `--check-contract`,
-    `--backend-cmd` (plugin dir also from `BOARD_PLUGIN_DIR` or discovery like
-    `scripts/board.sh`). Modules: `tui/src/config.rs`, `tui/src/control.rs`.
+  `board run` orchestrates. `--dump` for non-TTY text snapshot. Control plane:
+  start/stop run (`s` / `S`), backend picker (`b`/`B`), review toggle (`R`), help
+  (`?`). Start spawns `python3 -m board run -y --ui plain …` (stdout discarded)
+  and follows the new run’s events.
 - **`scripts/board.sh`**: bash launcher for `python3 -m board` with plugin path injection.
-- **Board runner (Phase 0–4):** top-level `board/` package — agent-agnostic multi-slice
-  driver. See `impl/BOARD_RUNNER_PLAN.md`.
-  - **Phase 0:** `python3 -m board plan` — target-mutex plan (`null` → `default`),
-    `run.planned` NDJSON under `.kuru/runs/<run_id>/`.
-  - **Phase 1:** `python3 -m board run --backend mock` — per-slice pipelines with
-    target mutex, dep unlock, engine-aligned routing (`verifying` re-verifies, does
-    **not** rebuild), try budget, deferred `kuru commit`, plain event UI.
-  - **Phase 2:** `python3 -m board run --backend claude` — live Claude Code stages
-    (`claude -p` + `/kuru:build|verify|review|ship --no-commit|check-contract`),
-    ported from `runner.py` dispatch. Multi-target concurrency comes from the board
-    scheduler (superset of sequential `runner.py`). Flags: `--claude-bin`,
-    `--permission-mode`, `--model`, `--settings`, `--allowed-tools`.
-  - **Phase 3:** `python3 -m board run --ui board` — hierarchical ANSI TUI (stdlib):
-    target lanes → slices → stages → agents; j/k select, expand/collapse, Enter
-    drill-in with log tail, `w` waiting filter, `l` pager, `p` pause new starts,
-    `c` cancel selected slice, `?` help, `q` quit. Non-TTY falls back to plain. Pure
-    view-model (`board/ui/viewmodel.py`) unit-tested from event sequences.
-  - **Phase 3b:** `python3 -m board run --backend grok` — live Grok Build stages
-    (`grok -p` / `--single`, `--cwd`, default `--always-approve` for autonomous board
-    runs — Grok has no `--yolo`). Self-contained stage prompts load skills from disk
-    (`skills/building-a-slice`, `verifying-a-slice`, `reviewing-a-slice`,
-    `checking-a-contract`) and drive the ledger via `KURU_PY` / `python3 …/kuru.py`
-    (no Claude slash-command discovery). `Popen` captures pid for board agent rows.
-    Flags: `--grok-bin`, `--no-always-approve`, `--grok-permission-mode`, `--max-turns`,
-    shared `--model`. Live smoke needs a logged-in `grok` CLI; CI uses mock + unit tests.
-  - **Phase 4:** cancel selected slice (`c` / `RunControl` process-group kill);
-    **`cmd` backend** (`--backend cmd --backend-cmd '… {prompt_file} {cwd} …'`);
-    optional **`--check-contract`** (default off; mock repair path when flagged);
-    `board status` / `board logs`; best-effort `progress.md` line after run.
+- **Board runner** (`board/` package): agent-agnostic multi-slice orchestrator.
+  - `python3 -m board plan` — target-mutex plan; NDJSON under `.kuru/runs/<run_id>/`.
+  - `python3 -m board run --backend mock|claude|grok|cmd` — per-slice pipelines
+    (target mutex, dep unlock, engine-aligned routing, try budget, deferred commit).
+    Progress UI: `--ui plain` (default) or `--ui json`. Interactive board: Ratatui
+    only (`scripts/board-tui.sh`).
+  - Claude stages via `claude -p` + `/kuru:*`; Grok stages via skill-on-disk prompts
+    + `kuru.py`; generic `--backend cmd --backend-cmd '…'`.
+  - Cancel (`RunControl`), optional `--check-contract`, `board status` / `board logs`,
+    `BOARD_HANDOFF.md` + `progress.md` line after run.
   - **`board/prompts.py`** — Claude slash prompts + Grok skill-on-disk prompts
     (ship always `--no-commit` / `set-status done --no-commit`).
 - **`kuru commit`:** deferred batch commit after `set-status done --no-commit`
   (shared `git add -A` helper with per-slice ship).
 - **`.kuru/.gitignore` seeds `runs/`** so board run logs are never swept into commits;
   `kuru doctor` warns if an older workspace is missing that line.
-- **`scripts/board-selftest.sh`** — plan, mock run, serial/parallel, verifying policy,
-  cap, deferred-commit isolation, Claude + Grok + cmd backend unit checks, cancel,
-  check-contract, Phase 3 view-model + board non-TTY fallback (no live API).
+- **`scripts/test/board-selftest.sh`** — plan, mock run, serial/parallel, verifying
+  policy, cap, deferred-commit isolation, Claude + Grok + cmd backend unit checks,
+  cancel, check-contract, plain UI, `--ui board` rejection (no live API).
 
 ### Changed
 - **`kuru next --all --json` waiting entries** now include `target` (and `depends_on` /

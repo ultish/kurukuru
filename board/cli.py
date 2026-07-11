@@ -527,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="board",
         description=(
             "Kurukuru board runner — agent-agnostic multi-slice orchestrator.\n"
-            "See impl/BOARD_RUNNER_PLAN.md."
+            "Interactive board UI: scripts/board-tui.sh (Ratatui)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -25,7 +25,7 @@ PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude -y
 
 Policy lives in `board/` + `scripts/kuru.py` (engine). The hierarchical UI is the Ratatui
 binary (`scripts/board-tui.sh` / `kuru-board-tui`), which spawns `board run --ui plain` and
-tails `.kuru/runs/*/events.ndjson`. See `tui/README.md` and `impl/BOARD_RUNNER_PLAN.md`.
+tails `.kuru/runs/*/events.ndjson`. See `tui/README.md`.
 
 The **Claude Code dynamic Workflow** path below remains valid as a **Claude-only / legacy**
 option (JS `Workflow` tool + `agent()`). Prefer board when both are available — board is

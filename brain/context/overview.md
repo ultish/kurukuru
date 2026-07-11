@@ -15,10 +15,11 @@ prose; they cannot talk past the engine.
 ## Responsibilities
 - Providing the `/kuru:*` Claude Code slash commands that drive the delivery pipeline
 - The deterministic state + gate engine (`scripts/kuru.py`) that owns ledger.json and gate-results.json
-- Three separated subagents (planner / builder / verifier) that encode the work/judgment split
+- Separated subagents (planner / builder / verifier / contract-critic) that encode the work/judgment split
 - Methodology skills (kuru-method, writing-specs, slicing-work, checking-a-contract, building-a-slice, verifying-a-slice, reviewing-a-slice, loop-workflow)
 - Templates that scaffold a `.kuru/` workspace inside any target repo
-- A standalone headless driver (`runner.py`) for unattended autonomous runs
+- Multi-slice board orchestrator (`board/`) and optional Ratatui board UI (`tui/`)
+- A standalone single-threaded Claude driver (`runner.py`) for unattended runs (prefer `python3 -m board` for multi-slice)
 
 ## Not responsible for
 - The actual project being built — kurukuru is the harness, not the cargo

@@ -17,8 +17,8 @@
 #
 # RHEL 9 / airgap Linux x86_64 (prebuilt via Docker Rocky 9):
 #   ./scripts/build-tui-rhel9.sh
-#   → dist/kuru-board-tui-x86_64-unknown-linux-gnu  (attach to GitHub Release)
-#   See docs/airgap-tui.md
+#   → dist/kuru-board-tui-linux-amd64.tar.gz  (attach to GitHub Release)
+#   See docs/airgap-tui.md / tui/README.md
 #
 set -euo pipefail
 

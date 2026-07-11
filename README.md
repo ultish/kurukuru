@@ -380,36 +380,41 @@ The plugin (the tool):
 ```
 kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── .claude-plugin/plugin.json
-├── commands/        init charter spec slice check-contract build verify review ship status next bearings loop loop-workflow
+├── commands/        init charter spec slice check-contract build verify review
+│                    ship status next bearings loop loop-workflow …
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier  kuru-contract-critic
-├── skills/          kuru-method writing-specs slicing-work checking-a-contract building-a-slice verifying-a-slice reviewing-a-slice loop-workflow
+├── skills/          kuru-method writing-specs slicing-work checking-a-contract
+│                    building-a-slice verifying-a-slice reviewing-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
-├── scripts/board.sh, board-tui.sh, build-tui-rhel9.sh  production launchers / release build
+├── scripts/board.sh, board-tui.sh, build-tui-rhel9.sh  production launchers / release
 ├── scripts/test/    selftest, board-selftest, smoke-headless, smoke-tui-linux-amd64
-└── templates/       artifact templates (config[.stack].json, init.sh, …) copied into target repos
+├── board/           multi-slice orchestrator (python3 -m board)
+├── tui/             Ratatui board UI (kuru-board-tui); see tui/README.md
+└── templates/       artifact templates copied into target repos by kuru init
 
-runner.py                   ← standalone headless driver (NOT part of the plugin)
-impl/                        ← internal docs, not shipped with the plugin
-├── BUILD_PLAN.md    full implementation spec
-└── TASKS.md         remaining validation tasks / changelog
+runner.py                   ← standalone single-threaded Claude driver (NOT part of the plugin)
+impl/                        ← internal/legacy docs (BUILD_PLAN, TASKS) — not shipped
 ```
 
 The `.kuru/` workspace (per target repo, created by `kuru init`):
 
 ```
 .kuru/
-├── config.json   ledger.json   charter.md   progress.md   init.sh
+├── config.json   ledger.json   charter.md   progress.md   BOARD_HANDOFF.md   init.sh
+├── profiles/     (resolved env profiles, when used)
 ├── spec/spec-N.md
+├── runs/<run_id>/  events.ndjson  summary.json  …   (gitignored; board orchestrator)
 └── slices/<id>/  slice.md  contract.yml  build-log.md  verification.md  gate-results.json
 ```
 
 `ledger.json` + `gate-results.json` are machine truth (only `kuru.py` writes
-them). Everything else is narrative written by agents.
+them). Everything else is narrative written by agents (or board run logs under
+`runs/`).
 
 **Commit `.kuru/`** in the target repo — it's the project's delivery memory.
 `kuru init` writes a `.kuru/.gitignore` that excludes the machine-local bits (the
-absolute `engine` path and transient `gate-*.log` files); everything else is meant
-to be shared.
+absolute `engine` path, transient `gate-*.log` files, and **`runs/`**); everything
+else is meant to be shared.
 
 ## Design principles
 

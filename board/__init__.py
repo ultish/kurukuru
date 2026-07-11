@@ -1,7 +1,9 @@
-"""Kurukuru board runner — agent-agnostic multi-slice orchestrator + TUI.
+"""Kurukuru board runner — agent-agnostic multi-slice orchestrator.
 
-Phases 0–4: plan, mock/claude/grok/cmd backends, hierarchical board UI,
-cancel, optional contract check, status/logs. See impl/BOARD_RUNNER_PLAN.md.
+``python3 -m board plan|run|status|logs`` drives per-slice pipelines (mock /
+claude / grok / cmd backends) and writes ``.kuru/runs/*/events.ndjson``.
+Progress UI is ``plain`` (default) or ``json``; interactive hierarchical board
+is the Ratatui binary (``scripts/board-tui.sh`` / ``kuru-board-tui``).
 """
 
 __version__ = "0.1.0"

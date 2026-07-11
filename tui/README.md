@@ -337,5 +337,5 @@ tui/
 | `../scripts/board.sh` | `python3 -m board` launcher |
 | `../scripts/board-tui.sh` | TUI launcher |
 | `../scripts/build-tui-rhel9.sh` | Docker → `dist/` for GitHub releases |
-| `../.kuru/BOARD_HANDOFF.md` (in target repos) | New-agent-tab briefing after board runs |
-| `../impl/BOARD_RUNNER_PLAN.md` | Board runner design history |
+| `../scripts/test/smoke-tui-linux-amd64.sh` | Rocky 9 smoke for the Linux amd64 binary |
+| Target repo `.kuru/BOARD_HANDOFF.md` | New-agent-tab briefing after board runs |
