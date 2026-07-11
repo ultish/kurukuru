@@ -1,0 +1,19 @@
+[package]
+name = "kuru-board-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Ratatui master-detail board for Kurukuru NDJSON run events"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "kuru-board-tui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

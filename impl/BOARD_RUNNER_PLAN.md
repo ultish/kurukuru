@@ -984,6 +984,25 @@ Use this section when resuming mid-build.
 - Notes: live Claude login still required for a real run; CI only exercises the dry
   path. `runner.py` is not deleted — board is the multi-target path.  
 
+### 2026-07-11 — Ratatui master-detail TUI
+
+- Done: Rust crate `tui/` (`kuru-board-tui`) using **Ratatui 0.29 + Crossterm 0.28**
+  - Left panel: targets + slices (colors by status)
+  - Right panel: detail meta + stage strip + log tail
+  - Live tail of `events.ndjson`; `--dump` for non-TTY
+  - Launcher: `scripts/board-tui.sh`
+- Invoke:
+  ```bash
+  # terminal 1
+  ./scripts/board.sh run -y --backend mock --repo ~/Developer/kuru-test
+  # terminal 2
+  ./scripts/board-tui.sh --repo ~/Developer/kuru-test
+  # or snapshot:
+  ./scripts/board-tui.sh --run-dir …/runs/r_xxx --dump
+  ```
+- Build: `cd tui && cargo build --release` (binary `tui/target/release/kuru-board-tui`)
+- Note: Python `--ui board` remains; Ratatui is the polished ops UI
+
 ### 2026-07-11 — Phase 3 implemented (hierarchical board TUI)
 
 - Phase: **3 done**  
@@ -1077,6 +1096,44 @@ Use this section when resuming mid-build.
 - Next: optional live smoke; no plugin version bump in this session.
 - Notes: full contract-repair planner for live agents still agent-dependent;
   mock repair is mechanical. Stronger pause already via `p` + `pause_event`.
+
+### 2026-07-11 — Ratatui TUI control plane
+
+- Done: control-plane features on `kuru-board-tui` (still no bottom shell / PTY)
+  - **Modals:** help (`?`), backend picker (`b`), confirm start (`s`); Esc closes
+  - **RunConfig** + **RunManager** (`tui/src/config.rs`, `tui/src/control.rs`):
+    spawn/stop `python3 -m board run -y --ui plain …` as process group;
+    `kuru set-review on|off`; review cache from ledger / `next --json`
+  - **Header:** `kuru-board · r_… · mock · review on · idle|running (pid)|finished · [s]tart [b]ackend [R]eview ?`
+  - **CLI:** `--plugin-dir`, `--backend`, `--kuru-py`, `--max-tries`,
+    `--check-contract`, `--backend-cmd`; plugin discovery via `BOARD_PLUGIN_DIR`
+    or walk for `board/` + `scripts/kuru.py`
+  - Interactive idle without an existing run is allowed (press `s` to start);
+    `--dump` still requires events
+- **Keybinds (TUI):**
+  | Key | Action |
+  |-----|--------|
+  | `s` | confirm + start board child |
+  | `S` / `x` | SIGTERM→SIGKILL process group |
+  | `b` | backend picker (mock\|claude\|grok\|cmd) |
+  | `B` | cycle backend |
+  | `R` | toggle review (`kuru set-review`) |
+  | `?` | help modal |
+  | Esc | close modal → leave slice (not quit) |
+  | `q` | quit |
+- **How to invoke:**
+  ```bash
+  cd tui && cargo build --release
+  # single pane: open TUI and press s (mock default)
+  ./scripts/board-tui.sh --repo ~/Developer/kuru-test --backend mock --wait-secs 0
+  # or pair with external orchestrator as before
+  ./scripts/board.sh run -y --backend mock --repo ~/Developer/kuru-test
+  ./scripts/board-tui.sh --repo ~/Developer/kuru-test
+  ./scripts/board-tui.sh --run-dir …/runs/r_xxx --dump
+  ```
+- Deferred: bottom shell / embedded PTY; in-TUI editing of `--backend-cmd`;
+  pause (`p`) / cancel-slice (`c`) from Ratatui (still on Python `--ui board`).
+- Build: warning-free `cargo build --release`; unit tests for RunConfig/status.
 
 ---
 

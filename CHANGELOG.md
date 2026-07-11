@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`.kuru/BOARD_HANDOFF.md`** — agent-tab briefing (orient ritual + latest board run).
+  Seeded by `kuru init` from `templates/board-handoff.md`; rewritten after each
+  `board run`. `progress.md` / bearings point at it.
+- **`kuru init` links existing project rules:** if `AGENTS.md` or `CLAUDE.md` (any
+  common casing) already exists at the repo root, append an idempotent
+  `<!-- kurukuru:begin -->` block pointing at `BOARD_HANDOFF.md` and the bearings
+  ritual. Never creates those files from scratch.
+- **Ratatui board TUI** (`tui/`): master–detail UI (left slices / right detail+log)
+  using Ratatui 0.29 + Crossterm 0.28. Binary `kuru-board-tui`; launcher
+  `scripts/board-tui.sh`. Tails `.kuru/runs/*/events.ndjson` while Python
+  `board run` orchestrates. `--dump` for non-TTY text snapshot.
+- **TUI control plane:** start/stop board runs from the TUI, backend picker, review
+  toggle, and modal help — no embedded PTY.
+  - Keys: `s` start (confirm) · `S`/`x` stop process group · `b` backend picker ·
+    `B` cycle backend · `R` toggle `kuru set-review` · `?` help · Esc closes modal
+    then leaves slice (never quits; `q` quits).
+  - Start spawns `python3 -m board run -y --ui plain --backend …` with
+    `PYTHONPATH` / `KURU_PY` / `CLAUDE_PLUGIN_ROOT`, then follows the new
+    `.kuru/runs/r_*` events. Header shows idle | running (pid) | finished.
+  - CLI: `--plugin-dir`, `--backend`, `--kuru-py`, `--max-tries`, `--check-contract`,
+    `--backend-cmd` (plugin dir also from `BOARD_PLUGIN_DIR` or discovery like
+    `scripts/board.sh`). Modules: `tui/src/config.rs`, `tui/src/control.rs`.
+- **`scripts/board.sh`**: bash launcher for `python3 -m board` with plugin path injection.
 - **Board runner (Phase 0–4):** top-level `board/` package — agent-agnostic multi-slice
   driver. See `impl/BOARD_RUNNER_PLAN.md`.
   - **Phase 0:** `python3 -m board plan` — target-mutex plan (`null` → `default`),
