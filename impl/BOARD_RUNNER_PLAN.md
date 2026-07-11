@@ -936,6 +936,19 @@ Use this section when resuming mid-build.
   mutex default, stall guards)  
 - Notes: no `run` command yet; hierarchical TUI is Phase 3  
 
+### 2026-07-11 — Phase 1 implemented
+
+- Phase: **1 done**  
+- Done:  
+  - `board/pipeline.py`, `scheduler.py`, `backends/mock.py`, `ui/plain.py`  
+  - `python3 -m board run --backend mock -y`  
+  - Policy: `verifying` → re-verify only (`build_count=1` under no_verdict)  
+  - Target mutex serial + multi-target parallel; max-tries cap; deferred commit  
+  - `board-selftest.sh` **18** checks  
+- Next: **Phase 2** Claude backend, and/or **Phase 3** hierarchical board TUI  
+- Notes: contract check/repair still skipped (`skip_check=True`); claude/grok backends
+  not implemented  
+
 ---
 
 ## 16. Acceptance criteria (whole project)

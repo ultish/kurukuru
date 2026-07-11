@@ -8,15 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Board runner (Phase 0):** top-level `board/` package — agent-agnostic multi-slice
-  driver scaffold. `python3 -m board plan` reads `kuru next --all --json`, prints a
-  target-mutex plan (`null` target → `default` lane), and can emit `run.planned`
-  NDJSON under `.kuru/runs/<run_id>/`. See `impl/BOARD_RUNNER_PLAN.md`.
+- **Board runner (Phase 0+1):** top-level `board/` package — agent-agnostic multi-slice
+  driver. See `impl/BOARD_RUNNER_PLAN.md`.
+  - **Phase 0:** `python3 -m board plan` — target-mutex plan (`null` → `default`),
+    `run.planned` NDJSON under `.kuru/runs/<run_id>/`.
+  - **Phase 1:** `python3 -m board run --backend mock` — per-slice pipelines with
+    target mutex, dep unlock, engine-aligned routing (`verifying` re-verifies, does
+    **not** rebuild), try budget, deferred `kuru commit`, plain event UI.
 - **`kuru commit`:** deferred batch commit after `set-status done --no-commit`
-  (shared `git add -A` helper with per-slice ship). For board / loop-workflow end-of-run.
+  (shared `git add -A` helper with per-slice ship).
 - **`.kuru/.gitignore` seeds `runs/`** so board run logs are never swept into commits;
   `kuru doctor` warns if an older workspace is missing that line.
-- **`scripts/board-selftest.sh`** — plan / events / multi-target / runs-isolation checks.
+- **`scripts/board-selftest.sh`** — plan, mock run, serial/parallel, verifying policy,
+  cap, deferred-commit isolation.
 
 ### Changed
 - **`kuru next --all --json` waiting entries** now include `target` (and `depends_on` /

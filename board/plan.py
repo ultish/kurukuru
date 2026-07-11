@@ -42,13 +42,14 @@ def build_plan(
         if scope_set is not None and sid not in scope_set:
             continue
         unmet = [u.upper() for u in (w.get("unmet") or [])]
+        dep_full = [d.upper() for d in (w.get("depends_on") or [])] or unmet
         waiting_deps.append(
             SlicePlanRow(
                 id=sid,
-                status="ready",
+                status=w.get("status") or "ready",
                 title=w.get("title") or "",
                 next_action=None,
-                depends_on=unmet,
+                depends_on=dep_full,
                 target=w.get("target"),
                 mutex_target=mutex_key(w.get("target")),
                 waiting_reason="deps",

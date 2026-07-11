@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,12 +22,17 @@ def utc_now_iso() -> str:
 class EventWriter:
     """Append-only NDJSON writer for a single run."""
 
-    def __init__(self, run_dir: Path, run_id: str):
+    def __init__(self, run_dir: Path, run_id: str, listeners: list | None = None):
         self.run_dir = Path(run_dir)
         self.run_id = run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.run_dir / "events.ndjson"
         self._fh: TextIO = self.path.open("a", encoding="utf-8")
+        self._listeners = list(listeners or [])
+        self._lock = threading.Lock()
+
+    def add_listener(self, fn) -> None:
+        self._listeners.append(fn)
 
     def emit(self, event_type: str, **payload: Any) -> dict[str, Any]:
         event: dict[str, Any] = {
@@ -35,8 +41,15 @@ class EventWriter:
             "type": event_type,
             **payload,
         }
-        self._fh.write(json.dumps(event, sort_keys=False) + "\n")
-        self._fh.flush()
+        with self._lock:
+            self._fh.write(json.dumps(event, sort_keys=False) + "\n")
+            self._fh.flush()
+            listeners = list(self._listeners)
+        for fn in listeners:
+            try:
+                fn(event)
+            except Exception:
+                pass
         return event
 
     def write_json(self, name: str, data: Any) -> Path:
