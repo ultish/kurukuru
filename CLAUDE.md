@@ -95,13 +95,27 @@ implies ownership of the checklist; "someone else bumped it" is not an exception
      - `dist/kuru-board-tui-linux-amd64.tar.gz` — **primary GitHub Release asset**
      - `dist/SHA256SUMS`
      - `file dist/kuru-board-tui-linux-amd64` → ELF 64-bit **x86-64** (not arm64)
-   - **Attach to the GitHub Release** for this tag (in addition to the plugin
-     source / marketplace packaging):
+   - Mention the tarball in the release notes (RHEL 9–class glibc, x86_64 only;
+     unpack → `chmod +x kuru-board-tui`; macOS still builds from `tui/` source).
+   - Do **not** commit `dist/` (gitignored). The asset lives on the Release only —
+     it is attached in step 5, not committed.
+5. **Commit, tag, and cut the GitHub Release** — there is **no CI**; releases are
+   100% manual. Committing and pushing to `main` does **not** create a release; a
+   Release only exists once you run `gh release create`. Every version bump gets a
+   matching git tag *and* a GitHub Release.
+   - Commit the release (on a branch, then fast-forward `main`), and `git push origin main`.
+   - Tag the release commit and push the tag:
      ```bash
-     gh release upload <tag> \
+     git tag -a v<X.Y.Z> -m "Release <X.Y.Z>: <headline>"
+     git push origin v<X.Y.Z>
+     ```
+   - Create the Release, attaching the dist assets in the same command (this both
+     creates the release for the tag and uploads the assets):
+     ```bash
+     gh release create v<X.Y.Z> \
+       --title "v<X.Y.Z> — <headline>" \
+       --notes "<the CHANGELOG section for this version>" \
        dist/kuru-board-tui-linux-amd64.tar.gz \
        dist/SHA256SUMS
      ```
-   - Mention the tarball in the release notes (RHEL 9–class glibc, x86_64 only;
-     unpack → `chmod +x kuru-board-tui`; macOS still builds from `tui/` source).
-   - Do **not** commit `dist/` (gitignored). The asset lives on the Release only.
+   - Verify: `gh release view v<X.Y.Z>` shows both assets and `isDraft: false`.
