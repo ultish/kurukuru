@@ -1,6 +1,6 @@
 # Board Runner Plan — agent-agnostic multi-slice orchestration + TUI
 
-**Status:** design only (not implemented)  
+**Status:** Phase 0–2 implemented (plan + mock run + Claude backend); Phase 3 TUI next  
 **Created:** 2026-07-11  
 **Goal:** Port the *policy* of `/kuru:loop-workflow` into a portable Python control
 plane with pluggable agent backends (Claude, Grok, Pi, mock) and a Grok-like
@@ -948,6 +948,29 @@ Use this section when resuming mid-build.
 - Next: **Phase 2** Claude backend, and/or **Phase 3** hierarchical board TUI  
 - Notes: contract check/repair still skipped (`skip_check=True`); claude/grok backends
   not implemented  
+
+### 2026-07-11 — Phase 2 implemented (Claude backend)
+
+- Phase: **2 done**  
+- Done:  
+  - `board/backends/claude.py` — `find_claude`, `ClaudeBackend.run_stage` → `claude -p`
+    with plugin-dir / permission-mode / model / settings / allowed-tools  
+  - `board/prompts.py` — slash prompts; ship always `/kuru:ship <id> --no-commit`  
+  - CLI: `--backend claude` + pass-through flags; mock remains default  
+  - Env: `CLAUDE_PLUGIN_ROOT` + `KURU_PY` for spawned sessions  
+  - Selftest: construct / missing-bin clear error / dry-run without binary (no live API)  
+- **How to invoke:**
+  ```bash
+  # Multi-slice / multi-target (preferred over runner.py for boards)
+  PYTHONPATH=. python3 -m board run --backend claude -y --repo <ws> \
+    --plugin-dir /path/to/kurukuru
+
+  # Optional: --claude-bin, --permission-mode, --model, --settings, --allowed-tools
+  # Sequential single-driver still available: python3 runner.py --repo <ws>
+  ```
+- Next: **Phase 3** hierarchical board TUI (`--ui board`)  
+- Notes: live Claude login still required for a real run; CI only exercises the dry
+  path. `runner.py` is not deleted — board is the multi-target path.  
 
 ---
 

@@ -300,6 +300,73 @@ else
   ok "plan refuses repo without .kuru"
 fi
 
+echo "== Phase 2: Claude backend construct + find_claude + missing bin =="
+python3 - <<'PY'
+from pathlib import Path
+from board.backends.claude import ClaudeBackend, ClaudeNotFoundError, find_claude
+from board.prompts import stage_prompt, stage_role
+
+assert find_claude("/nonexistent/claude-binary-xyz") is None
+assert stage_prompt("build", "sl-0001") == "/kuru:build SL-0001"
+assert stage_prompt("verify", "SL-0002") == "/kuru:verify SL-0002"
+assert stage_prompt("review", "SL-0003") == "/kuru:review SL-0003"
+assert stage_prompt("ship", "SL-0004") == "/kuru:ship SL-0004 --no-commit"
+assert stage_prompt("check", "SL-0005") == "/kuru:check-contract SL-0005"
+assert stage_role("build") == "builder"
+assert stage_role("verify") == "verifier"
+
+# Construct without a real binary — build_cmd must raise clearly.
+be = ClaudeBackend(plugin_dir=Path("."), claude_bin=None)
+try:
+    be.build_cmd("/kuru:build SL-0001")
+    raise SystemExit("expected ClaudeNotFoundError")
+except ClaudeNotFoundError:
+    pass
+
+# run_stage with missing bin → exit 127, log written, no spawn
+import tempfile
+td = Path(tempfile.mkdtemp())
+log = td / "build.log"
+res = be.run_stage(
+    stage="build",
+    slice_id="SL-0001",
+    prompt="/kuru:build SL-0001",
+    cwd=td,
+    log_path=log,
+)
+assert res.exit_code == 127, res
+assert "not found" in res.note.lower() or "claude" in res.note.lower(), res.note
+assert log.is_file() and log.stat().st_size > 0
+assert res.role == "builder"
+print("claude unit ok")
+PY
+[ $? -eq 0 ] && ok "ClaudeBackend unit: construct, prompts, missing bin" \
+  || fail "ClaudeBackend unit checks"
+
+# CLI: --backend claude with bogus --claude-bin refuses cleanly (no live API)
+repo_cl="$(newrepo)"
+seed_workspace "$repo_cl"
+cd "$repo_cl"
+"${KURU[@]}" new-slice "Claude miss" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+if "${BOARD[@]}" run --repo "$repo_cl" --plugin-dir "$ROOT" -y --backend claude \
+    --claude-bin /nonexistent/claude-xyz --no-commit >/tmp/br-claude-miss.$$ 2>&1; then
+  fail "claude missing bin should exit non-zero"
+else
+  grep -qi 'claude CLI not found\|not found' /tmp/br-claude-miss.$$ \
+    && ok "CLI --backend claude missing bin: clear error" \
+    || { fail "CLI claude missing: unclear error"; cat /tmp/br-claude-miss.$$ | tail -10; }
+fi
+
+# Dry-run does not require claude binary
+if "${BOARD[@]}" run --repo "$repo_cl" --plugin-dir "$ROOT" -y --backend claude \
+    --claude-bin /nonexistent/claude-xyz --dry-run >/tmp/br-claude-dry.$$ 2>&1; then
+  ok "CLI --backend claude --dry-run works without binary"
+else
+  fail "dry-run with claude backend should succeed without binary"
+  cat /tmp/br-claude-dry.$$ | tail -10
+fi
+
 echo
 echo "board selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

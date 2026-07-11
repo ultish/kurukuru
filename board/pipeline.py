@@ -9,6 +9,7 @@ from typing import Callable
 from board.backends.base import AgentBackend
 from board.events import EventWriter
 from board.ledger import KuruError, Ledger
+from board.prompts import stage_prompt
 NEEDS_BUILD = frozenset({"ready", "in_progress", "rejected"})
 DEFAULT_MAX_NO_VERDICT = 2
 DEFAULT_MAX_PIPELINE_ITERS = 20
@@ -174,7 +175,7 @@ class SlicePipeline:
     def _stage(self, rt: SliceRuntime, stage: str):
         sid = rt.id
         log_path = self.run_dir / sid / f"{stage}.log"
-        prompt = f"board mock/stage: {stage} {sid}"
+        prompt = stage_prompt(stage, sid)
         t0_try = rt.tries
         self.events.emit("stage.started", id=sid, stage=stage, **{"try": t0_try})
 

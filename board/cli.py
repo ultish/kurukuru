@@ -1,4 +1,4 @@
-"""board CLI — plan + run (mock backend in Phase 1)."""
+"""board CLI — plan + run (mock / claude backends)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from board import __version__
+from board.backends.claude import ClaudeBackend, find_claude
 from board.backends.mock import MockBackend, load_mock_scenarios
 from board.events import EventWriter, default_run_dir, new_run_id
 from board.ledger import Ledger, resolve_kuru_py
@@ -138,18 +139,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("(dry-run — not starting pipelines)")
             return 0
 
-        if args.backend != "mock":
-            print(
-                f"error: backend {args.backend!r} not implemented yet "
-                f"(Phase 1 supports --backend mock)",
-                file=sys.stderr,
-            )
+        backend = _make_backend(args, ledger=ledger, kuru_py=kuru_py, plugin_dir=Path(args.plugin_dir))
+        if backend is None:
             return 2
 
-        scenarios = load_mock_scenarios(
-            Path(args.mock_scenario) if args.mock_scenario else None
-        )
-        backend = MockBackend(ledger, scenarios)
         sched = Scheduler(
             ledger=ledger,
             backend=backend,
@@ -192,6 +185,47 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_version(_: argparse.Namespace) -> int:
     print(f"board {__version__}")
     return 0
+
+
+def _make_backend(
+    args: argparse.Namespace,
+    *,
+    ledger: Ledger,
+    kuru_py: Path,
+    plugin_dir: Path,
+):
+    """Construct the stage backend. Prints errors and returns None on failure."""
+    if args.backend == "mock":
+        scenarios = load_mock_scenarios(
+            Path(args.mock_scenario) if args.mock_scenario else None
+        )
+        return MockBackend(ledger, scenarios)
+
+    if args.backend == "claude":
+        claude_bin = find_claude(getattr(args, "claude_bin", None))
+        if not claude_bin:
+            print(
+                "error: claude CLI not found (use --claude-bin PATH, or install "
+                "Claude Code so `claude` is on PATH).",
+                file=sys.stderr,
+            )
+            return None
+        return ClaudeBackend(
+            plugin_dir=plugin_dir.resolve(),
+            claude_bin=claude_bin,
+            permission_mode=getattr(args, "permission_mode", None),
+            allowed_tools=getattr(args, "allowed_tools", None),
+            settings=getattr(args, "settings", None),
+            model=getattr(args, "model", None),
+            kuru_py=kuru_py,
+        )
+
+    print(
+        f"error: backend {args.backend!r} not implemented yet "
+        f"(supported: mock, claude)",
+        file=sys.stderr,
+    )
+    return None
 
 
 def _add_repo_flags(p: argparse.ArgumentParser, here: Path) -> None:
@@ -246,19 +280,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_p.set_defaults(func=cmd_plan)
 
-    run_p = sub.add_parser("run", help="drive ready slices (Phase 1: --backend mock)")
+    run_p = sub.add_parser(
+        "run",
+        help="drive ready slices (--backend mock|claude; default mock)",
+    )
     _add_repo_flags(run_p, here)
     run_p.add_argument(
         "--backend",
         default="mock",
         choices=["mock", "claude", "grok", "cmd"],
-        help="stage worker (only mock implemented in Phase 1)",
+        help="stage worker (mock for tests; claude for live runs; grok/cmd later)",
     )
     run_p.add_argument(
         "--mock-scenario",
         default=None,
         metavar="PATH",
         help="JSON scenario file for mock backend",
+    )
+    # Claude backend flags (mirrors runner.py)
+    run_p.add_argument(
+        "--claude-bin",
+        default=None,
+        metavar="PATH",
+        help="path to the claude CLI (default: autodetect)",
+    )
+    run_p.add_argument(
+        "--permission-mode",
+        default="bypassPermissions",
+        help="claude --permission-mode (default: bypassPermissions for autonomous runs)",
+    )
+    run_p.add_argument(
+        "--allowed-tools",
+        default=None,
+        help="pass-through to claude --allowedTools",
+    )
+    run_p.add_argument(
+        "--settings",
+        default=None,
+        help="pass-through to claude --settings (JSON permission allowlist)",
+    )
+    run_p.add_argument(
+        "--model",
+        default=None,
+        help="pass-through to claude --model",
     )
     run_p.add_argument(
         "--ui",
