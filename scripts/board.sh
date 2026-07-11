@@ -7,7 +7,7 @@
 # Usage:
 #   ./scripts/board.sh plan
 #   ./scripts/board.sh run -y --backend mock
-#   ./scripts/board.sh run -y --backend grok --ui board --repo ~/Developer/kuru-test
+#   ./scripts/board.sh run -y --backend grok --repo ~/Developer/kuru-test
 #   ./scripts/board.sh status
 #   ./scripts/board.sh logs --slice SL-0001 --stage build --tail 40
 #
@@ -46,18 +46,17 @@ Common examples:
   $(basename "$0") plan
   $(basename "$0") plan --repo ~/Developer/kuru-test
   $(basename "$0") run -y --backend mock
-  $(basename "$0") run -y --backend mock --ui board      # Python ANSI board
-  $(basename "$0") run -y --backend grok --ui board
+  $(basename "$0") run -y --backend grok
   $(basename "$0") run -y --backend claude
   $(basename "$0") run -y --backend cmd --backend-cmd 'my-agent -p {prompt_file} --dir {cwd}'
   $(basename "$0") status
   $(basename "$0") logs --slice SL-0001 --stage verify --tail 50
 
-Ratatui master-detail UI (separate binary; left tasks / right detail):
-  # terminal 1:
-  $(basename "$0") run -y --backend mock --repo ~/Developer/kuru-test
-  # terminal 2:
-  $PLUGIN_DIR/scripts/board-tui.sh --repo ~/Developer/kuru-test
+Interactive hierarchical board (Ratatui — not part of this launcher):
+  $PLUGIN_DIR/scripts/board-tui.sh --repo ~/Developer/kuru-test --backend mock
+  # or pair headless board + TUI watch:
+  #   $(basename "$0") run -y --backend mock --repo ~/Developer/kuru-test
+  #   $PLUGIN_DIR/scripts/board-tui.sh --repo ~/Developer/kuru-test
 
 Plugin:  $PLUGIN_DIR
 KURU_PY: \$KURU_PY

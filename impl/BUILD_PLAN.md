@@ -540,7 +540,7 @@ Files: `README.md` (§6.1). Acceptance:
 ## 9. Addendum — changes since the original spec
 
 This section records where the shipped plugin departs from §1–§8. The code and
-`scripts/selftest.sh` are authoritative; this is the map.
+`scripts/test/selftest.sh` are authoritative; this is the map.
 
 ### 9.1 Review send-back is `verified → rejected` (not `→ in_progress`)
 The engine has **no** `verified → in_progress` transition. A code review that finds

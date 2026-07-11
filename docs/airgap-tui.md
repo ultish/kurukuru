@@ -121,8 +121,8 @@ ldd dist/kuru-board-tui-linux-amd64
 Python-only (stdlib):
 
 ```bash
-python3 -m board run --ui plain …    # logs
-python3 -m board run --ui board …    # stdlib ANSI board
+python3 -m board run --ui plain …    # streaming event lines (default)
+# hierarchical board is this binary (kuru-board-tui), not a Python --ui mode
 ```
 
 ## Rebuild options

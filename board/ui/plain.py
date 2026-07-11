@@ -1,4 +1,9 @@
-"""Streaming plain-text event UI (CI / default headless)."""
+"""Streaming plain-text event UI (CI / default headless).
+
+Interactive hierarchical board UI lives in the Ratatui binary (`kuru-board-tui` /
+`scripts/board-tui.sh`), not in this package. Board run always uses plain or json
+so it never fights the TTY when the Rust TUI is watching events.ndjson.
+"""
 
 from __future__ import annotations
 
@@ -51,3 +56,10 @@ class PlainUI:
         line = format_event(ev)
         if line is not None:
             print(line, file=self.stream, flush=True)
+
+
+def make_run_ui(ui_name: str) -> PlainUI | None:
+    """Factory used by CLI. ``json`` → no listener; anything else → PlainUI."""
+    if ui_name == "json":
+        return None
+    return PlainUI()

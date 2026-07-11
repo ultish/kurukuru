@@ -1,4 +1,4 @@
-//! Pure NDJSON event → hierarchical board state (port of board/ui/viewmodel.py).
+//! Pure NDJSON event → hierarchical board state (Ratatui view-model).
 
 use serde_json::Value;
 use std::collections::HashMap;

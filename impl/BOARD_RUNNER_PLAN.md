@@ -942,7 +942,7 @@ Use this section when resuming mid-build.
   - `board/` package: `cli plan`, `ledger`, `events`, `preconditions`, `plan`, `models`  
   - Engine: `runs/` in init `.gitignore`; `kuru commit`; doctor warns if `runs/` missing;
     `next --all` waiting entries include `target`  
-  - `scripts/board-selftest.sh` (12 checks); engine selftest **201** checks  
+  - `scripts/test/board-selftest.sh` (12 checks); engine selftest **201** checks  
   - Invoke: `PYTHONPATH=. python3 -m board plan --repo <ws> --emit-events`  
 - Next: **Phase 1** — scheduler + mock backend + plain UI (engine-aligned verifying,
   mutex default, stall guards)  
@@ -1001,7 +1001,7 @@ Use this section when resuming mid-build.
   ./scripts/board-tui.sh --run-dir …/runs/r_xxx --dump
   ```
 - Build: `cd tui && cargo build --release` (binary `tui/target/release/kuru-board-tui`)
-- Note: Python `--ui board` remains; Ratatui is the polished ops UI
+- Note: Python `--ui board` **removed** — interactive board is Ratatui only; board run is plain/json
 
 ### 2026-07-11 — Phase 3 implemented (hierarchical board TUI)
 
@@ -1164,7 +1164,7 @@ The project is “done” for v1 when:
 ```bash
 # 1. Read this plan (§12 current phase, §15 last session log)
 # 2. Engine still green
-./scripts/selftest.sh
+./scripts/test/selftest.sh
 
 # 3. See what exists
 ls board 2>/dev/null || echo "board/ not started"

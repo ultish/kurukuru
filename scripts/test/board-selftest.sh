@@ -3,7 +3,8 @@
 # Phase 3 board TUI + Phase 3b Grok (unit only; no live API).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# This file lives in scripts/test/; repo root is two levels up.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 KURU=(python3 "$ROOT/scripts/kuru.py")
 BOARD=(python3 -m board)
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
@@ -371,55 +372,15 @@ else
   cat /tmp/br-claude-dry.$$ | tail -10
 fi
 
-echo "== Phase 3: viewmodel unit tests (no TTY) =="
-if python3 -m board.ui.test_viewmodel; then
-  ok "viewmodel: two targets busy + mutex/dep waiters + agent spawn"
-else
-  fail "viewmodel unit tests"
-fi
-
-echo "== Phase 3: --ui board non-TTY falls back to plain =="
-repo_b="$(newrepo)"
-seed_workspace "$repo_b"
-cd "$repo_b"
-"${KURU[@]}" new-slice "Board UI" >/dev/null
-"${KURU[@]}" set-status SL-0001 ready >/dev/null
-# Force non-TTY: redirect stdin/stdout away from a terminal
-if "${BOARD[@]}" run --repo "$repo_b" --plugin-dir "$ROOT" -y --backend mock \
-    --ui board --no-commit </dev/null >/tmp/br-board-nontty.$$ 2>/tmp/br-board-nontty-err.$$; then
-  :
-else
-  # mock run should still succeed even if UI falls back
-  fail "board non-TTY run exited non-zero"
-  cat /tmp/br-board-nontty-err.$$ | tail -15
-fi
-grep -qi 'falling back to plain\|TTY' /tmp/br-board-nontty-err.$$ \
-  && ok "board non-TTY: fallback note on stderr" \
-  || { fail "board non-TTY: missing fallback note"; cat /tmp/br-board-nontty-err.$$ | tail -10; }
-# plain-style event lines should appear on stdout
-grep -qE 'run started|planned:|SL-0001' /tmp/br-board-nontty.$$ \
-  && ok "board non-TTY: plain event stream on stdout" \
-  || { fail "board non-TTY: no plain output"; head -20 /tmp/br-board-nontty.$$; }
-st="$("${KURU[@]}" show SL-0001 --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
-[ "$st" = "done" ] && ok "board non-TTY mock run still ships" || fail "status=$st after board fallback"
-
-echo "== Phase 3: make_run_ui + board_available helpers =="
+echo "== Phase 3: make_run_ui (plain / json only; hierarchical board is Ratatui) =="
 python3 - <<'PY'
-from board.ui.board import board_available, make_run_ui
-from board.ui.plain import PlainUI
-from board.ui.board import BoardUI
+from board.ui.plain import PlainUI, make_run_ui
 
-# non-interactive make_run_ui("board") must not raise; returns PlainUI off-TTY
-ui = make_run_ui("board", run_dir=None)
-assert ui is not None
-# When not a TTY (this script redirects in CI-ish), expect PlainUI
-import sys
-if not (sys.stdout.isatty() and sys.stdin.isatty()):
-    assert isinstance(ui, PlainUI), type(ui)
-plain = make_run_ui("plain")
-assert isinstance(plain, PlainUI)
+assert isinstance(make_run_ui("plain"), PlainUI)
 assert make_run_ui("json") is None
-print("make_run_ui ok", "tty" if board_available() else "nontty")
+# unknown names still get a PlainUI stream (CLI validates choices)
+assert isinstance(make_run_ui("whatever"), PlainUI)
+print("make_run_ui ok")
 PY
 [ $? -eq 0 ] && ok "make_run_ui factory" || fail "make_run_ui factory"
 
@@ -433,6 +394,23 @@ cd "$repo_r"
   >/tmp/br-plain-reg.$$ 2>&1 \
   && ok "plain UI mock run still works" \
   || { fail "plain UI regression"; tail -20 /tmp/br-plain-reg.$$; }
+
+echo "== Phase 3: --ui board rejected (removed; use board-tui.sh) =="
+if "${BOARD[@]}" run --help 2>&1 | grep -qE -- '--ui.*plain|choices.*plain'; then
+  ok "CLI help documents plain/json ui"
+else
+  fail "CLI help missing --ui plain/json"
+fi
+# argparse should reject the old choice
+if "${BOARD[@]}" run --repo "$repo_r" --plugin-dir "$ROOT" -y --backend mock --ui board --no-commit \
+    >/tmp/br-board-gone.$$ 2>&1; then
+  fail "--ui board should no longer be accepted"
+  tail -10 /tmp/br-board-gone.$$
+else
+  grep -qiE 'invalid choice|board' /tmp/br-board-gone.$$ \
+    && ok "--ui board rejected by argparse" \
+    || { fail "unclear error for --ui board"; tail -10 /tmp/br-board-gone.$$; }
+fi
 
 echo "== Phase 3b: Grok backend construct + find_grok + stage_prompt_grok =="
 python3 - <<PY

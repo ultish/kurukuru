@@ -13,14 +13,16 @@ When the kurukuru plugin root is available on `PYTHONPATH` (or you are in the pl
 
 ```bash
 # From the target workspace (with .kuru/), plugin on PYTHONPATH:
-PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude --ui board -y
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude -y
 # Grok Build:
-PYTHONPATH=/path/to/kurukuru python3 -m board run --backend grok --ui board -y
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend grok -y
 # Generic shell agent (Pi etc.):
 PYTHONPATH=/path/to/kurukuru python3 -m board run --backend cmd \
   --backend-cmd 'my-agent -p {prompt_file} --dir {cwd}' -y
-# Headless / CI:
-PYTHONPATH=/path/to/kurukuru python3 -m board run --backend mock --ui plain -y
+# Headless / CI (default --ui plain streams event lines):
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend mock -y
+# Interactive hierarchical board (Ratatui; starts board under the hood):
+#   scripts/board-tui.sh --repo . --backend claude
 ```
 
 The board runner implements the same policy as this command (target mutex, try budget,

@@ -151,16 +151,25 @@ if ! "$DOCKER" "${BUILD_ARGS[@]}"; then
   echo "" >&2
   echo "error: image build failed." >&2
   echo "" >&2
-  echo "If you saw:  exec /bin/sh: exec format error" >&2
-  echo "  the runtime cannot execute linux/amd64 (x86_64) on this Mac." >&2
+  echo "Common on Apple Silicon building --platform linux/amd64:" >&2
+  echo "" >&2
+  echo "  exec /bin/sh: exec format error" >&2
+  echo "  qemu: uncaught target signal 11 (Segmentation fault)" >&2
+  echo "  rustc installed - (error reading rustc version)  then SIGSEGV" >&2
+  echo "" >&2
+  echo "  That is broken/missing x86_64 emulation under Docker (QEMU/Rosetta)," >&2
+  echo "  not a problem with the Dockerfile itself." >&2
+  echo "" >&2
   echo "  Fixes (pick one):" >&2
-  echo "    1) Docker Desktop → Settings → General:" >&2
-  echo "         enable Virtualization framework + Rosetta for x86_64/amd64" >&2
-  echo "         then: DOCKER=docker ./scripts/build-tui-rhel9.sh" >&2
-  echo "    2) Fall back to Apple Container:" >&2
+  echo "    1) Prefer Apple Container (often works when Docker QEMU segfaults):" >&2
   echo "         DOCKER=container ./scripts/build-tui-rhel9.sh" >&2
-  echo "         # Container app open + 'container system start' if needed" >&2
-  echo "    3) Build on a real x86_64 Linux box / GitHub Actions (no emulation)." >&2
+  echo "         # open Container app; container system start if needed" >&2
+  echo "    2) Docker Desktop → Settings → General:" >&2
+  echo "         Virtualization framework ON + Rosetta for x86_64/amd64 ON" >&2
+  echo "         restart Docker, then: DOCKER=docker ./scripts/build-tui-rhel9.sh --no-cache" >&2
+  echo "    3) Build on real x86_64 Linux / GitHub Actions (no emulation)." >&2
+  echo "    4) If dist/ already has a good binary from an earlier successful build," >&2
+  echo "       you can skip rebuild and attach that tarball." >&2
   exit 2
 fi
 

@@ -73,7 +73,8 @@ class Scheduler:
         self.max_tries = max_tries
         self.max_workers = max_workers or 8
         self._lock = threading.Lock()
-        # When set, do not start *new* pipelines (in-flight continue). Board `p`.
+        # When set, do not start *new* pipelines (in-flight continue). Optional;
+        # interactive pause lives in Ratatui if wired later.
         self.pause_event = pause_event
         self.control = control
         self.skip_check = skip_check

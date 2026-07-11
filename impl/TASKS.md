@@ -19,7 +19,7 @@ validation** — exactly the work suited to a cheaper model.
 
 ## Status (updated 2026-06-03)
 
-- ✅ **T2 done** — `scripts/selftest.sh` reproduces SL-1/SL-2/SL-6 (+ verifying
+- ✅ **T2 done** — `scripts/test/selftest.sh` reproduces SL-1/SL-2/SL-6 (+ verifying
   state, `--stack` presets, builder self-cert refusal). 33 checks, exits non-zero
   on any failure.
 - ✅ **T4 done** — `templates/config.{python,go,node}.json` presets + `kuru init
@@ -34,7 +34,7 @@ validation** — exactly the work suited to a cheaper model.
 
 ### Beyond the original list (added since)
 
-- ✅ **Headless bridge proven** — `scripts/smoke-headless.sh` runs
+- ✅ **Headless bridge proven** — `scripts/test/smoke-headless.sh` runs
   `claude -p "/kuru:status" --plugin-dir <here> --permission-mode bypassPermissions`
   in a throwaway repo and confirms the plugin command resolves and runs `kuru.py`
   in that fresh session.

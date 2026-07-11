@@ -17,7 +17,12 @@ addendum) win.
 ## Layout
 
 - `scripts/kuru.py` — the deterministic state + gate engine. **The single source of
-  truth.** Only it may mutate `ledger.json` / `gate-results.json`.
+  truth.** Only it may mutate `ledger.json` / `gate-results.json`. Path is
+  load-bearing (`${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py`); do not relocate.
+- `scripts/board.sh`, `board-tui.sh`, `build-tui-rhel9.sh` — production launchers /
+  release build (see `scripts/README.md`).
+- `scripts/test/` — engine/board/smoke self-checks (`selftest.sh`,
+  `board-selftest.sh`, `smoke-headless.sh`, `smoke-tui-linux-amd64.sh`).
 - `commands/` — the `/kuru:*` slash commands (thin orchestrators).
 - `agents/` — the separated subagents (`kuru-planner`, `kuru-builder`,
   `kuru-verifier`).
@@ -58,10 +63,11 @@ addendum) win.
 
 ## Before you finish a change
 
-- Run `scripts/selftest.sh` — it must stay green (exercises the engine's
-  guarantees). Add a check when you change engine behavior.
-- For command/agent discovery changes, `scripts/smoke-headless.sh` proves `/kuru:*`
-  still resolves in a headless `claude -p` session.
+- Run `scripts/test/selftest.sh` — it must stay green (exercises the engine's
+  guarantees). Add a check when you change engine behavior. Board changes: also
+  `scripts/test/board-selftest.sh`.
+- For command/agent discovery changes, `scripts/test/smoke-headless.sh` proves
+  `/kuru:*` still resolves in a headless `claude -p` session.
 
 ## Release checklist (when cutting a version)
 

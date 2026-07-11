@@ -1,16 +1,8 @@
-"""Board UIs — plain (Phase 1), hierarchical board (Phase 3)."""
+"""Board run UIs — plain event stream (CI / headless). Hierarchical board is Ratatui."""
 
-from board.ui.plain import PlainUI
-from board.ui.board import BoardUI, board_available, make_run_ui
-from board.ui.viewmodel import BoardState, apply_event, empty_state, overview_rows
+from board.ui.plain import PlainUI, make_run_ui
 
 __all__ = [
     "PlainUI",
-    "BoardUI",
-    "board_available",
     "make_run_ui",
-    "BoardState",
-    "apply_event",
-    "empty_state",
-    "overview_rows",
 ]

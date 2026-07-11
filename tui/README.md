@@ -205,14 +205,18 @@ docker rm kbt
 
 (`container build` works the same way if that’s your CLI — still pass platform + context.)
 
-**Apple Silicon + `exec /bin/sh: exec format error`:** the runtime tried to run
-an x86_64 Rocky image without working amd64 emulation. Prefer:
+**Apple Silicon + Docker QEMU issues:** if you see
+`exec format error`, or `qemu: uncaught target signal 11`, or
+`rustc … (error reading rustc version)` then a segfault — Docker’s amd64
+emulation is broken or incomplete. Prefer Apple Container (this often works
+when Docker does not):
 
 ```bash
 DOCKER=container ./scripts/build-tui-rhel9.sh
 ```
 
-Or enable Docker Desktop’s **Rosetta for x86_64/amd64**, or build on real x86_64 CI.
+Or enable Docker Desktop **Rosetta for x86_64/amd64** and rebuild with
+`--no-cache`, or build on real x86_64 CI / a Linux box (no emulation).
 
 #### Target triple
 
@@ -275,6 +279,20 @@ ldd  dist/kuru-board-tui-linux-amd64
 ./dist/kuru-board-tui-linux-amd64 --help
 ```
 
+### Smoke-test the Linux binary from a Mac
+
+You **cannot** run the ELF on macOS. Run it inside Rocky 9 (amd64) instead:
+
+```bash
+# from repo root — uses docker/container + rockylinux:9
+./scripts/test/smoke-tui-linux-amd64.sh
+
+# force Apple Container if Docker QEMU is flaky:
+DOCKER=container ./scripts/test/smoke-tui-linux-amd64.sh
+```
+
+Checks: `uname -m` is `x86_64`, `ldd` resolves, `--help` works, optional `--dump` against a local run fixture.
+
 More detail: [`docs/airgap-tui.md`](../docs/airgap-tui.md).
 
 ---
@@ -284,8 +302,9 @@ More detail: [`docs/airgap-tui.md`](../docs/airgap-tui.md).
 Python-only (stdlib, no Rust):
 
 ```bash
-python3 -m board run --ui plain …    # streaming logs
-python3 -m board run --ui board …    # hierarchical ANSI board
+python3 -m board run --ui plain …    # streaming event lines (default)
+python3 -m board run --ui json …     # summary JSON only
+# hierarchical board is this crate (scripts/board-tui.sh), not Python --ui board
 ```
 
 ---

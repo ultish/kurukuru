@@ -3,10 +3,11 @@
 #
 # Reproduces impl/BUILD_PLAN.md §7 SL-1 / SL-2 / SL-6 (plus the verifying-state and
 # --stack behaviors) in throwaway temp dirs. Exits non-zero on the first failure,
-# so the harness can self-check (`scripts/selftest.sh`).
+# so the harness can self-check (`scripts/test/selftest.sh`).
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# This file lives in scripts/test/; repo root is two levels up.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 KURU="python3 $ROOT/scripts/kuru.py"
 

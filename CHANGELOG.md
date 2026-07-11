@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Python hierarchical board UI (`--ui board`).** Interactive board is Ratatui only
+  (`scripts/board-tui.sh` / `kuru-board-tui`). Removed `board/ui/board.py`,
+  `board/ui/viewmodel.py`, and `board/ui/test_viewmodel.py`. `python3 -m board run`
+  supports `--ui plain` (default, streaming logs) and `--ui json` only. The TUI still
+  spawns `board run --ui plain` and tails `events.ndjson`.
+
+### Changed
+- **`scripts/` layout:** production tooling stays at the top level (`kuru.py`,
+  `board.sh`, `board-tui.sh`, `build-tui-rhel9.sh`); test/smoke suites moved to
+  `scripts/test/` (`selftest.sh`, `board-selftest.sh`, `smoke-headless.sh`,
+  `smoke-tui-linux-amd64.sh`). `scripts/kuru.py` path is unchanged (load-bearing).
+  See `scripts/README.md`.
+
 ### Added
 - **RHEL 9 TUI release build:** `tui/Dockerfile.rhel9` (Rocky 9 / glibc-matched,
   `x86_64-unknown-linux-gnu` only) and `scripts/build-tui-rhel9.sh` →

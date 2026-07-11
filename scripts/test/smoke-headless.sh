@@ -5,7 +5,8 @@
 # ran kuru.py inside that session. This is the bridge the external runner relies on.
 set -uo pipefail
 
-HARNESS="$(cd "$(dirname "$0")/.." && pwd)"
+# This file lives in scripts/test/; repo root is two levels up.
+HARNESS="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # locate the claude CLI (not always on a non-interactive PATH)
 CLAUDE="$(command -v claude || true)"

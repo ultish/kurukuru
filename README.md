@@ -42,7 +42,7 @@ Enforced **in code** (not by trust):
 4. A slice cannot start while any of its `--depends-on` slices isn't `done`.
 
 (All three are demonstrated by the dry-run in [`impl/BUILD_PLAN.md`](impl/BUILD_PLAN.md) §7, SL-2,
-and exercised by [`scripts/selftest.sh`](scripts/selftest.sh).)
+and exercised by [`scripts/test/selftest.sh`](scripts/test/selftest.sh).)
 
 ## Install
 
@@ -274,7 +274,7 @@ engine's gate/role/dependency rules still gate every transition.
 1. **Prerequisites:** `python3` and the `claude` CLI, logged in. Confirm with
    `claude --version`. (The runner auto-detects `claude` on `PATH` or common
    install locations; otherwise pass `--claude-bin /path/to/claude`.)
-2. **Prove the bridge works** (once): `./scripts/smoke-headless.sh` — it loads the
+2. **Prove the bridge works** (once): `./scripts/test/smoke-headless.sh` — it loads the
    plugin into a headless `claude -p` session and confirms a `/kuru:*` command
    resolves.
 3. **Get a target repo to the loopable point** with the manual commands:
@@ -384,8 +384,8 @@ kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── agents/          kuru-planner  kuru-builder  kuru-verifier  kuru-contract-critic
 ├── skills/          kuru-method writing-specs slicing-work checking-a-contract building-a-slice verifying-a-slice reviewing-a-slice loop-workflow
 ├── scripts/kuru.py  the deterministic state + gate engine (single source of truth)
-├── scripts/selftest.sh  regression test for the engine's guarantees
-├── scripts/smoke-headless.sh  proves /kuru:* resolves in a headless `claude -p` session
+├── scripts/board.sh, board-tui.sh, build-tui-rhel9.sh  production launchers / release build
+├── scripts/test/    selftest, board-selftest, smoke-headless, smoke-tui-linux-amd64
 └── templates/       artifact templates (config[.stack].json, init.sh, …) copied into target repos
 
 runner.py                   ← standalone headless driver (NOT part of the plugin)

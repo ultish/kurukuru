@@ -16,14 +16,16 @@ slices serialize).
 **Default recommendation:** shell out to the portable Python control plane when available:
 
 ```bash
-PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude --ui board -y
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude -y
 # also: --backend grok | mock | cmd --backend-cmd '…'
 # plan only: python3 -m board plan
 # history:  python3 -m board status
+# interactive board: scripts/board-tui.sh --repo . --backend claude
 ```
 
-Policy lives in `board/` + `scripts/kuru.py` (engine). The hierarchical TUI (`--ui board`)
-supports pause (`p`) and cancel selected slice (`c`). See `impl/BOARD_RUNNER_PLAN.md`.
+Policy lives in `board/` + `scripts/kuru.py` (engine). The hierarchical UI is the Ratatui
+binary (`scripts/board-tui.sh` / `kuru-board-tui`), which spawns `board run --ui plain` and
+tails `.kuru/runs/*/events.ndjson`. See `tui/README.md` and `impl/BOARD_RUNNER_PLAN.md`.
 
 The **Claude Code dynamic Workflow** path below remains valid as a **Claude-only / legacy**
 option (JS `Workflow` tool + `agent()`). Prefer board when both are available — board is

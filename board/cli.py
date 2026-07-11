@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,8 +19,7 @@ from board.ledger import Ledger, resolve_kuru_py
 from board.plan import build_plan, format_plan_text
 from board.preconditions import check_preconditions
 from board.scheduler import RunResult, Scheduler
-from board.ui.board import BoardUI, board_available, make_run_ui
-from board.ui.plain import PlainUI
+from board.ui.plain import make_run_ui
 
 
 def _parse_slices(raw: str | None) -> list[str] | None:
@@ -133,9 +131,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     next_all = ledger.next_all()
     plan = build_plan(next_all, scope=scope, max_tries=args.max_tries)
 
-    # Board TUI paints its own header; skip noisy plan dump on a real TTY board.
-    will_board = args.ui == "board" and board_available()
-    if args.ui != "json" and not will_board:
+    if args.ui != "json":
         print(format_plan_text(plan, repo=str(repo)))
         print()
 
@@ -152,18 +148,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Shared with board UI (`p` pause, `c` cancel) and backends (kill).
-    pause_event = threading.Event()
+    # Cancel is shared with backends (kill). Interactive board UI is Ratatui
+    # (`scripts/board-tui.sh`); this process only streams plain / json.
     control = RunControl()
     ui_name = args.ui
-    ui = make_run_ui(
-        ui_name,
-        run_dir=run_dir,
-        pause_event=pause_event,
-        on_cancel=control.request_cancel,
-    )
+    ui = make_run_ui(ui_name)
     listeners = [ui.on_event] if ui is not None else []
-    use_board = isinstance(ui, BoardUI)
     skip_check = not bool(getattr(args, "check_contract", False))
 
     with EventWriter(run_dir, run_id, listeners=listeners) as ev:
@@ -178,15 +168,13 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "review": plan.review,
                 "command": "run",
                 "check_contract": not skip_check,
-                "ui": "board" if use_board else ui_name,
+                "ui": ui_name,
             },
         )
         ev.emit("run.planned", **plan.to_event_payload())
         ev.emit("run.started", run_id=run_id, backend=args.backend, review=plan.review)
 
         if args.dry_run:
-            if use_board:
-                ui.drain_and_paint_once()
             print("(dry-run — not starting pipelines)")
             return 0
 
@@ -207,7 +195,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             run_dir=run_dir,
             review=plan.review,
             max_tries=args.max_tries,
-            pause_event=pause_event if use_board else None,
             control=control,
             skip_check=skip_check,
         )
@@ -244,47 +231,25 @@ def cmd_run(args: argparse.Namespace) -> int:
                 review=plan.review,
             )
 
-        if use_board:
-            # Interactive: scheduler on a worker; main thread owns the TTY.
-            thr = threading.Thread(target=_run_sched, name="board-scheduler", daemon=True)
-            thr.start()
-            try:
-                ui.run_loop(done=lambda: not thr.is_alive())
-            finally:
-                # Never leave the scheduler wedged on pause after UI exit.
-                pause_event.clear()
-                thr.join(timeout=3600)
-            result = result_box.get("result")
-            if result is None:
-                print("error: scheduler did not finish", file=sys.stderr)
-                return 2
-        else:
-            _run_sched()
-            result = result_box["result"]
-            if (
-                result.shipped
-                and not args.no_commit
-                and args.ui == "plain"
-                and result_box.get("commit_ok")
-            ):
-                print(f"deferred commit: {result_box.get('commit_detail') or 'ok'}")
+        _run_sched()
+        result = result_box["result"]
+        if (
+            result.shipped
+            and not args.no_commit
+            and args.ui == "plain"
+            and result_box.get("commit_ok")
+        ):
+            print(f"deferred commit: {result_box.get('commit_detail') or 'ok'}")
 
         if args.ui == "json":
             print(json.dumps(result.to_summary(), indent=2))
-        elif not use_board:
+        else:
             print()
             print(
                 f"summary: shipped={result.shipped} capped={result.capped} "
                 f"stuck={result.stuck} blocked_at_start={result.blocked_at_start}"
             )
             print(f"events: {run_dir / 'events.ndjson'}")
-            print(f"handoff: {repo / '.kuru' / 'BOARD_HANDOFF.md'}")
-        else:
-            # After board restores the terminal, print a one-line summary.
-            print(
-                f"summary: shipped={result.shipped} capped={result.capped} "
-                f"stuck={result.stuck}  events: {run_dir / 'events.ndjson'}"
-            )
             print(f"handoff: {repo / '.kuru' / 'BOARD_HANDOFF.md'}")
 
         return result.exit_code()
@@ -683,8 +648,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--ui",
         default="plain",
-        choices=["plain", "board", "json"],
-        help="progress UI: plain (CI), board (hierarchical TTY), json (summary only)",
+        choices=["plain", "json"],
+        help=(
+            "progress UI: plain (streaming logs, default), json (summary only). "
+            "Interactive hierarchical board: scripts/board-tui.sh (Ratatui)"
+        ),
     )
     run_p.add_argument("--yes", "-y", action="store_true", help="skip approval prompt")
     run_p.add_argument("--dry-run", action="store_true", help="plan only, do not run")

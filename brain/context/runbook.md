@@ -59,18 +59,21 @@ it's per-project state from testing. The plugin's `.gitignore` should catch it.
 
 ```bash
 # Confirm the engine is reachable and passes all guarantees
-scripts/selftest.sh          # must stay green; add checks when engine behavior changes
+scripts/test/selftest.sh          # must stay green; add checks when engine behavior changes
+scripts/test/board-selftest.sh    # board orchestrator (when touching board/)
 
 # Confirm /kuru:* resolves in a headless claude -p session
-scripts/smoke-headless.sh    # requires claude CLI logged in
+scripts/test/smoke-headless.sh    # requires claude CLI logged in
 ```
 
 `selftest.sh` covers: illegal transitions refused, gate-freshness enforcement,
 builder role restriction, dependency start guard, and the review reject path.
+Production scripts stay under `scripts/` (`kuru.py`, launchers); tests under
+`scripts/test/` — see `scripts/README.md`.
 
 ## On-call / escalation
 
 Solo project — Jimmy (jxhui) is the only contact. For bugs, check:
 1. `kuru doctor` in the target repo for workspace issues
-2. `scripts/selftest.sh` for engine regressions
+2. `scripts/test/selftest.sh` for engine regressions
 3. `CHANGELOG.md` for recent behavior changes that might explain the symptom
