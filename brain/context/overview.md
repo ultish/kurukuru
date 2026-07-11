@@ -7,8 +7,8 @@ to "done" — claiming gates pass, claiming scope was met — without any machin
 kurukuru enforces the discipline: facts that gate progress live in files the engine
 controls, not in what the agent says.
 
-The thesis: charter → PRD → small vertical slices with frozen contracts → build
-(one agent) → independent verify (a different agent) → done. A tiny stdlib Python
+The thesis: charter → spec → small vertical slices with frozen contracts → build
+(one agent) → independent verify (a different agent) → review → done. A tiny stdlib Python
 engine owns all state transitions and gate records. Agents can reason and write
 prose; they cannot talk past the engine.
 
@@ -16,7 +16,7 @@ prose; they cannot talk past the engine.
 - Providing the `/kuru:*` Claude Code slash commands that drive the delivery pipeline
 - The deterministic state + gate engine (`scripts/kuru.py`) that owns ledger.json and gate-results.json
 - Three separated subagents (planner / builder / verifier) that encode the work/judgment split
-- Methodology skills (kuru-method, writing-prds, slicing-work, building-a-slice, verifying-a-slice)
+- Methodology skills (kuru-method, writing-specs, slicing-work, checking-a-contract, building-a-slice, verifying-a-slice, reviewing-a-slice, loop-workflow)
 - Templates that scaffold a `.kuru/` workspace inside any target repo
 - A standalone headless driver (`runner.py`) for unattended autonomous runs
 

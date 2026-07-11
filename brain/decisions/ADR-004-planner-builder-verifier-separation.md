@@ -21,14 +21,14 @@ independent gating that a self-verifying agent cannot.
 
 A secondary problem: a planner agent that also implements code is incentivised to
 scope things it can build rather than things that should be built. Keeping planning
-separate preserves the integrity of the PRD and contract.
+separate preserves the integrity of the spec and contract.
 
 ## Decision
 
 Three permanently separated roles, each a distinct subagent with different tool
 allowlists:
 
-- **`kuru-planner`** — expands charters into PRDs and PRDs into candidate slice
+- **`kuru-planner`** — expands charters into specs and specs into candidate slice
   boundaries. Has `Write`/`Edit` to produce artifacts. Never implements code.
 - **`kuru-builder`** — implements exactly one slice vertically. Has `Write`/`Edit`.
   The engine hard-blocks `set-status verified --by builder` — the builder cannot
@@ -69,7 +69,7 @@ process relabelled. The bias to confirm one's own work is not overcome by a prom
 
 **Two agents (builder + verifier), no separate planner.** Evaluated — would remove
 the incentive problem in scoping but was rejected because it still couples planning
-and implementation in one agent. The planner's role in producing a grounded PRD
+and implementation in one agent. The planner's role in producing a grounded spec
 (reading actual code, flagging gaps as open questions rather than invented requirements)
 warrants its own separation.
 

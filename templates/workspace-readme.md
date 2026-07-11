@@ -39,5 +39,8 @@ scaffolded `.kuru/.gitignore` excludes the only machine-local bits:
 
 - `engine` — an absolute path to `kuru.py` on one machine (`kuru init --force`
   regenerates it after a clone or if the plugin moves);
+- `.ledger.lock` — advisory lock file for concurrent `set-status` (board / loop-workflow);
 - `slices/*/gate-*.log` — transient gate output (each run's tail is preserved in
-  the committed `gate-results.json`).
+  the committed `gate-results.json`);
+- `runs/` — board-orchestrator per-run event logs, stage transcripts, and prompts
+  (never commit these; `kuru commit` / auto-ship use `git add -A`).

@@ -21,6 +21,7 @@ Usage:
   kuru next                         print the next actionable slice
   kuru set-status <id> <status> [--note "..."] [--by agent|human] [--no-commit]
                                     (-> done auto-commits the working tree; --no-commit skips it)
+  kuru commit [--message "..."]     deferred batch commit after --no-commit ships
   kuru set-review <on|off>          toggle code review (on: verified -> review -> ship)
   kuru gate <id>                    run the configured deterministic gates
   kuru check <id>                   print whether <id> may advance to 'verified'
@@ -425,8 +426,16 @@ def cmd_init(args):
         "README.md": read_template("workspace-readme.md"),
         "init.sh": render(read_template("init.sh"), PROJECT=root.name),
         # .kuru/ is meant to be committed (it's the project's delivery memory);
-        # this excludes only the machine-local bits.
-        ".gitignore": "# machine-local — do not commit\nengine\n.ledger.lock\nslices/*/gate-*.log\n",
+        # this excludes only the machine-local bits. `runs/` is the board
+        # orchestrator's per-run event logs / stage transcripts — never ship those
+        # (deferred `git add -A` would otherwise sweep them into history).
+        ".gitignore": (
+            "# machine-local — do not commit\n"
+            "engine\n"
+            ".ledger.lock\n"
+            "slices/*/gate-*.log\n"
+            "runs/\n"
+        ),
     }
     for name, content in seed.items():
         path = kd / name
@@ -850,7 +859,11 @@ def cmd_next(args):
                 if st == "ready":
                     unmet = unmet_deps(led, s)
                     if unmet:
-                        waiting.append({"id": s["id"], "title": s["title"], "unmet": unmet})
+                        waiting.append({
+                            "id": s["id"], "title": s["title"], "unmet": unmet,
+                            "target": s.get("target"), "depends_on": deps_of(s),
+                            "status": s["status"],
+                        })
                         continue
                 actionable.append({
                     "next_action": action_for(led, s), "id": s["id"],
@@ -860,6 +873,7 @@ def cmd_next(args):
                     "dir": str(kuru_dir() / "slices" / s["id"]),
                 })
         draft = [{"id": x["id"], "title": x["title"]} for x in led["slices"] if x["status"] == "draft"]
+        # blocked stays a list of ids (stable for callers); board looks up targets if needed
         blocked = [x["id"] for x in led["slices"] if x["status"] == "blocked"]
         done = [x["id"] for x in led["slices"] if x["status"] == "done"]
         if use_json:
@@ -990,34 +1004,72 @@ def _set_status_impl(args):
             _commit_slice(s)
 
 
-def _commit_slice(s: dict) -> None:
-    """Commit the working tree when a slice reaches `done`, so each shipped slice
-    is one atomic commit — its code, its `.kuru/` artifacts, and the ledger's
-    transition to `done` together. Best-effort: it never undoes the state change.
-    If the repo isn't a git work tree, there's nothing to commit, or `git commit`
-    fails (e.g. no configured identity, a rejecting hook), it warns and moves on —
-    the slice is already `done` in the ledger."""
+def _git_commit_working_tree(message: str, *, context: str = "") -> str | None:
+    """Best-effort `git add -A` + commit at the workspace root.
+
+    Returns the short SHA on success, or None if skipped/failed. Never raises.
+    Callers that already flipped ledger state (e.g. set-status done) must not
+    undo that state when this fails. Relies on `.kuru/.gitignore` so machine-local
+    paths (engine, .ledger.lock, gate logs, runs/) stay out of the commit.
+    """
     root = find_root()
     if root is None:
-        return
+        return None
 
     def git(*a):
         return subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
 
     if git("rev-parse", "--is-inside-work-tree").returncode != 0:
-        return  # not a git repo — quietly skip
+        return None  # not a git repo — quietly skip
     git("add", "-A")
     if not git("status", "--porcelain").stdout.strip():
         print("  (working tree clean — nothing to commit)")
-        return
-    msg = f"kuru: ship {s['id']} — {s['title']}"
-    r = git("commit", "-m", msg)
+        return None
+    r = git("commit", "-m", message)
     if r.returncode != 0:
         detail = (r.stderr.strip() or r.stdout.strip() or "git commit failed").splitlines()[0]
-        print(f"  ! auto-commit skipped ({detail}); {s['id']} is still marked done")
-        return
+        suffix = f"; {context}" if context else ""
+        print(f"  ! auto-commit skipped ({detail}){suffix}")
+        return None
     sha = git("rev-parse", "--short", "HEAD").stdout.strip()
-    print(f"  committed {sha}: {msg}")
+    print(f"  committed {sha}: {message}")
+    return sha
+
+
+def _commit_slice(s: dict) -> None:
+    """Commit the working tree when a slice reaches `done`, so each shipped slice
+    is one atomic commit — its code, its `.kuru/` artifacts, and the ledger's
+    transition to `done` together. Best-effort: it never undoes the state change."""
+    _git_commit_working_tree(
+        f"kuru: ship {s['id']} — {s['title']}",
+        context=f"{s['id']} is still marked done",
+    )
+
+
+def cmd_commit(args):
+    """Deferred batch commit after one or more `set-status done --no-commit` ships.
+
+    Used by the board runner / loop-workflow: flip many slices to done without
+    mid-run commits, then commit once on a quiescent tree. Same `git add -A`
+    semantics as per-slice auto-commit (respects `.kuru/.gitignore`).
+    """
+    root = find_root()
+    if root is None:
+        die("no .kuru workspace found here.")
+    msg = (args.message or "").strip()
+    if not msg:
+        ids = []
+        if getattr(args, "slices", None):
+            ids = [x.strip().upper() for x in args.slices.split(",") if x.strip()]
+        if ids:
+            msg = f"kuru: ship {', '.join(ids)}"
+        else:
+            msg = "kuru: board run — deferred ship commit"
+    sha = _git_commit_working_tree(msg)
+    if sha is None:
+        # Distinguish clean skip from failure is already printed; exit 0 on clean
+        # tree so orchestrators can call commit unconditionally.
+        return
 
 
 def _config() -> dict:
@@ -1329,6 +1381,19 @@ def cmd_doctor(args):
                                     f"(resurrect it with `set-status {d} draft`, or re-cut the dependency)")
     except Exception as e:
         problems.append(f"ledger.json invalid: {e}")
+
+    # Board / deferred-commit safety: `git add -A` must not sweep run logs into
+    # history. Missing ignore is a warning (existing workspaces) until operators
+    # add `runs/` — not a hard doctor fail.
+    gi = kd / ".gitignore"
+    gi_text = gi.read_text() if gi.exists() else ""
+    if not re.search(r"(?m)^\s*runs/?\s*$", gi_text):
+        warnings.append(
+            ".kuru/.gitignore does not exclude runs/ — board run logs under "
+            ".kuru/runs/ can be swept into commits by `git add -A` / `kuru commit`. "
+            "Add a `runs/` line (new `kuru init` seeds this)."
+        )
+
     if problems:
         print("Problems found:")
         for p in problems:
@@ -1419,6 +1484,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="for `done`: flip the ledger only, skip the auto-commit (the caller commits later — "
                         "used by /kuru:loop-workflow, which commits once after the parallel run)")
     s.set_defaults(fn=cmd_set_status)
+
+    s = sub.add_parser("commit",
+                       help="deferred batch commit after set-status done --no-commit "
+                            "(board runner / loop-workflow end-of-run)")
+    s.add_argument("--message", "-m", default=None,
+                   help="commit message (default: derived from --slices or a board-run template)")
+    s.add_argument("--slices", default=None, metavar="IDS",
+                   help="comma-separated slice ids for the default message only")
+    s.set_defaults(fn=cmd_commit)
 
     s = sub.add_parser("set-review", help="turn code review on/off for this workspace "
                                           "(on: verified -> review -> ship; off: verified -> ship)")

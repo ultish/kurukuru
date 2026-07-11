@@ -6,10 +6,10 @@
 |-----------|------|
 | `scripts/kuru.py` | **The single source of truth.** Deterministic state + gate engine. The only thing allowed to mutate `ledger.json` and `gate-results.json`. stdlib only, no pip. |
 | `commands/` (12 files) | Thin slash-command orchestrators (`/kuru:*`). They call the engine and dispatch subagents. Methodology lives in skills, not here. |
-| `agents/kuru-planner` | Expands charters → PRDs → candidate slice boundaries. Has Write/Edit — it produces artifacts. |
+| `agents/kuru-planner` | Expands charters → specs → candidate slice boundaries. Has Write/Edit — it produces artifacts. |
 | `agents/kuru-builder` | Implements exactly one slice vertically. Runs gates. Sets `built`. Cannot set `verified` or `reviewed`. Has Write/Edit. |
 | `agents/kuru-verifier` | Adversarial gatekeeper. Re-runs gates, exercises the running app, cites concrete evidence per AC. Read-only tools (no Write/Edit of source). Sets `verified` or `rejected`. |
-| `skills/` (5 dirs) | Deep methodology: `kuru-method` (spine), `writing-prds`, `slicing-work`, `building-a-slice`, `verifying-a-slice`. These are the highest-value content. |
+| `skills/` (8 dirs) | Deep methodology: `kuru-method` (spine), `writing-specs`, `slicing-work`, `checking-a-contract`, `building-a-slice`, `verifying-a-slice`, `reviewing-a-slice`, `loop-workflow`. These are the highest-value content. |
 | `templates/` | Files copied into the target repo's `.kuru/` by `kuru init`. Filenames are **load-bearing** — `kuru.py` reads them by exact name. |
 | `runner.py` | Standalone headless driver. NOT part of the plugin. Reads `kuru next --json`, spawns a fresh `claude -p` per step. Builder and verifier are separate processes. |
 | `.claude-plugin/plugin.json` | Plugin manifest. Claude Code auto-discovers `commands/`, `agents/`, `skills/` by convention — no explicit listing needed. |
@@ -39,7 +39,7 @@ The plugin itself holds no runtime state.
 | `ledger.json` | Machine truth — slice list, statuses, history | `kuru.py` only |
 | `gate-results.json` | Machine truth — gate run results per slice | `kuru.py` only |
 | `config.json` | Gate commands for this project (editable by user/charter) | User / `/kuru:charter` |
-| `charter.md`, `progress.md`, `prd/*.md` | Narrative — written by agents and humans | Agents / humans |
+| `charter.md`, `progress.md`, `spec/*.md` | Narrative — written by agents and humans | Agents / humans |
 | `slices/<id>/slice.md`, `contract.yml` | Slice spec + frozen contract | Planner / `/kuru:slice` |
 | `slices/<id>/build-log.md` | Builder's running notes | kuru-builder |
 | `slices/<id>/verification.md` | Verifier's evidence record | kuru-verifier |

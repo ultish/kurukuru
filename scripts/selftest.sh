@@ -49,6 +49,7 @@ for f in config.json ledger.json charter.md progress.md README.md init.sh .gitig
   [ -f ".kuru/$f" ] && ok "init wrote $f" || fail "init missing $f"
 done
 grep -q "^engine$" .kuru/.gitignore && ok ".gitignore excludes machine-local engine path" || fail ".gitignore missing engine"
+grep -qE '^runs/?$' .kuru/.gitignore && ok ".gitignore excludes board runs/" || fail ".gitignore missing runs/"
 [ -x ".kuru/init.sh" ] && ok "init.sh is executable" || fail "init.sh not executable"
 [ -f ".kuru/engine" ] && grep -q "kuru.py" .kuru/engine && ok "init records engine path (.kuru/engine)" || fail "engine path not recorded"
 expect_ok   "doctor healthy" $KURU doctor
@@ -561,12 +562,28 @@ echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); a={x['id'] f
   && ok "next --all lists both independent ready slices (not just the first)" || fail "actionable set wrong: $allj"
 echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); w=d['waiting']; sys.exit(0 if any(x['id']=='SL-0002' and x['unmet']==['SL-0001'] for x in w) else 1)" \
   && ok "next --all reports a dep-blocked ready slice under waiting" || fail "waiting set wrong: $allj"
+echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); w=d['waiting']; sys.exit(0 if any(x['id']=='SL-0002' and 'target' in x for x in w) else 1)" \
+  && ok "next --all waiting entries include target field" || fail "waiting missing target: $allj"
 # finish A; B should now become actionable, A leaves the actionable set
 drive_to_verified >/dev/null 2>&1   # drives SL-0001 to verified
 $KURU set-status SL-0001 done >/dev/null
 allj="$($KURU next --all --json)"
 echo "$allj" | python3 -c "import json,sys; d=json.load(sys.stdin); a={x['id'] for x in d['actionable']}; sys.exit(0 if 'SL-0002' in a and 'SL-0001' not in a else 1)" \
   && ok "next --all unlocks a dependent once its dep is done" || fail "dependent not unlocked: $allj"
+
+echo "== kuru commit: deferred batch commit + runs/ not swept =="
+newrepo >/dev/null
+$KURU init >/dev/null
+echo "deferred" > note.txt
+$KURU commit -m "kuru: test deferred commit" >/dev/null
+git log -1 --oneline | grep -q "deferred commit" \
+  && ok "kuru commit creates a commit" || fail "kuru commit did not commit"
+mkdir -p .kuru/runs/r_test && echo secret > .kuru/runs/r_test/events.ndjson
+echo dirty2 > note2.txt
+$KURU commit -m "kuru: test runs ignored" >/dev/null
+git ls-tree -r HEAD --name-only | grep -q '^\.kuru/runs/' \
+  && fail "kuru commit swept .kuru/runs/ into history" \
+  || ok "kuru commit does not include .kuru/runs/"
 
 echo "== ledger lock: concurrent set-status writes all survive =="
 newrepo >/dev/null

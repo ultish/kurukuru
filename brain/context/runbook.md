@@ -10,7 +10,7 @@ needed for most users. `CLAUDE_PLUGIN_ROOT` is set automatically by Claude Code 
 the plugin loads, so the engine path resolves out of the box.
 
 **To use in a target repo:** run `kuru init` to scaffold `.kuru/`, then use
-`/kuru:charter` → `/kuru:prd` → `/kuru:slice` → `/kuru:build` → `/kuru:verify`.
+`/kuru:charter` → `/kuru:spec` → `/kuru:slice` → `/kuru:build` → `/kuru:verify` → `/kuru:review` → `/kuru:ship`.
 
 ## Configuration
 
