@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Board runner selftest — Phase 0 plan + Phase 1 mock scheduler.
+# Board runner selftest — Phase 0 plan + Phase 1 mock + Phase 2 Claude +
+# Phase 3 board TUI + Phase 3b Grok (unit only; no live API).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -429,6 +430,147 @@ cd "$repo_r"
   >/tmp/br-plain-reg.$$ 2>&1 \
   && ok "plain UI mock run still works" \
   || { fail "plain UI regression"; tail -20 /tmp/br-plain-reg.$$; }
+
+echo "== Phase 3b: Grok backend construct + find_grok + stage_prompt_grok =="
+python3 - <<PY
+from pathlib import Path
+from board.backends.grok import GrokBackend, GrokNotFoundError, find_grok
+from board.prompts import (
+    stage_prompt,
+    stage_prompt_claude,
+    stage_prompt_for,
+    stage_prompt_grok,
+    skill_path_for,
+)
+
+assert find_grok("/nonexistent/grok-binary-xyz") is None
+# Claude slash form still the default stage_prompt
+assert stage_prompt("build", "sl-0001") == "/kuru:build SL-0001"
+assert stage_prompt_claude("ship", "SL-0004") == "/kuru:ship SL-0004 --no-commit"
+
+plugin = Path("$ROOT").resolve()
+kpy = plugin / "scripts" / "kuru.py"
+assert kpy.is_file(), kpy
+p = stage_prompt_grok("build", "sl-0001", plugin_dir=plugin, kuru_py=kpy)
+assert "SL-0001" in p
+assert str(kpy) in p or "kuru.py" in p
+skill = skill_path_for("build", plugin)
+assert skill is not None and "building-a-slice" in str(skill)
+assert str(skill) in p
+assert "BUILDER" in p or "builder" in p.lower()
+assert "verified" in p.lower()  # must warn builder not to set verified
+
+pv = stage_prompt_grok("verify", "SL-0002", plugin_dir=plugin, kuru_py=kpy)
+assert "verifying-a-slice" in pv
+assert "SL-0002" in pv
+
+ps = stage_prompt_grok("ship", "SL-0003", plugin_dir=plugin, kuru_py=kpy)
+assert "done" in ps and "--no-commit" in ps
+assert "SL-0003" in ps
+
+assert stage_prompt_for("claude", "build", "SL-0001") == "/kuru:build SL-0001"
+pg = stage_prompt_for("grok", "build", "SL-0001", plugin_dir=plugin, kuru_py=kpy)
+assert "building-a-slice" in pg
+
+# Construct without a real binary — build_cmd must raise clearly.
+be = GrokBackend(plugin_dir=plugin, grok_bin=None, kuru_py=kpy)
+try:
+    be.build_cmd("hello")
+    raise SystemExit("expected GrokNotFoundError")
+except GrokNotFoundError:
+    pass
+
+# Default always_approve → --always-approve in cmd (no --yolo on grok)
+be2 = GrokBackend(plugin_dir=plugin, grok_bin="/usr/bin/true", kuru_py=kpy)
+cmd = be2.build_cmd("hi", cwd=Path("/tmp"))
+assert cmd[0] == "/usr/bin/true"
+assert "-p" in cmd and "hi" in cmd
+assert "--always-approve" in cmd
+assert "--cwd" in cmd
+
+be3 = GrokBackend(
+    plugin_dir=plugin, grok_bin="/usr/bin/true", always_approve=False, kuru_py=kpy
+)
+assert "--always-approve" not in be3.build_cmd("x")
+
+# run_stage with missing bin → exit 127, log written
+import tempfile
+td = Path(tempfile.mkdtemp())
+log = td / "build.log"
+res = be.run_stage(
+    stage="build",
+    slice_id="SL-0001",
+    prompt="",
+    cwd=td,
+    log_path=log,
+)
+assert res.exit_code == 127, res
+assert "not found" in res.note.lower() or "grok" in res.note.lower(), res.note
+assert log.is_file() and log.stat().st_size > 0
+assert res.role == "builder"
+print("grok unit ok")
+PY
+[ $? -eq 0 ] && ok "GrokBackend unit: construct, prompts, missing bin, always-approve" \
+  || fail "GrokBackend unit checks"
+
+# CLI: --backend grok with bogus --grok-bin refuses cleanly (no live API)
+repo_g="$(newrepo)"
+seed_workspace "$repo_g"
+cd "$repo_g"
+"${KURU[@]}" new-slice "Grok miss" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+if "${BOARD[@]}" run --repo "$repo_g" --plugin-dir "$ROOT" -y --backend grok \
+    --grok-bin /nonexistent/grok-xyz --no-commit >/tmp/br-grok-miss.$$ 2>&1; then
+  fail "grok missing bin should exit non-zero"
+else
+  grep -qi 'grok CLI not found\|not found' /tmp/br-grok-miss.$$ \
+    && ok "CLI --backend grok missing bin: clear error" \
+    || { fail "CLI grok missing: unclear error"; cat /tmp/br-grok-miss.$$ | tail -10; }
+fi
+
+# Dry-run does not require grok binary
+if "${BOARD[@]}" run --repo "$repo_g" --plugin-dir "$ROOT" -y --backend grok \
+    --grok-bin /nonexistent/grok-xyz --dry-run >/tmp/br-grok-dry.$$ 2>&1; then
+  ok "CLI --backend grok --dry-run works without binary"
+else
+  fail "dry-run with grok backend should succeed without binary"
+  cat /tmp/br-grok-dry.$$ | tail -10
+fi
+
+# Popen path: fake grok binary that echoes and exits 0; pid should be set
+fake_grok="$tmp/fake-grok"
+cat > "$fake_grok" <<'SH'
+#!/usr/bin/env bash
+# Minimal stand-in for `grok -p …` — ignore flags, print args, exit 0.
+echo "fake-grok: $*"
+exit 0
+SH
+chmod +x "$fake_grok"
+python3 - <<PY
+from pathlib import Path
+from board.backends.grok import GrokBackend
+import tempfile
+plugin = Path("$ROOT")
+kpy = plugin / "scripts" / "kuru.py"
+be = GrokBackend(plugin_dir=plugin, grok_bin="$fake_grok", kuru_py=kpy)
+td = Path(tempfile.mkdtemp())
+log = td / "build.log"
+res = be.run_stage(
+    stage="build",
+    slice_id="SL-0001",
+    prompt="test prompt for fake grok",
+    cwd=td,
+    log_path=log,
+)
+assert res.exit_code == 0, res
+assert res.pid is not None and res.pid > 0, res
+text = log.read_text()
+assert "fake-grok" in text or "test prompt" in text, text[:500]
+assert "--always-approve" in text
+print("fake grok popen ok pid=", res.pid)
+PY
+[ $? -eq 0 ] && ok "GrokBackend Popen: pid set + log captures command" \
+  || fail "GrokBackend Popen unit"
 
 echo
 echo "board selftest: $PASS passed, $FAIL failed"

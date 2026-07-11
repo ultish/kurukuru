@@ -1,4 +1,4 @@
-"""board CLI — plan + run (mock / claude backends)."""
+"""board CLI — plan + run (mock / claude / grok backends)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from board import __version__
 from board.backends.claude import ClaudeBackend, find_claude
+from board.backends.grok import GrokBackend, find_grok
 from board.backends.mock import MockBackend, load_mock_scenarios
 from board.events import EventWriter, default_run_dir, new_run_id
 from board.ledger import Ledger, resolve_kuru_py
@@ -275,9 +276,33 @@ def _make_backend(
             kuru_py=kuru_py,
         )
 
+    if args.backend == "grok":
+        grok_bin = find_grok(getattr(args, "grok_bin", None))
+        if not grok_bin:
+            print(
+                "error: grok CLI not found (use --grok-bin PATH, or install the "
+                "Grok Build CLI so `grok` is on PATH — common: ~/.local/bin/grok, "
+                "~/.grok/bin/grok).",
+                file=sys.stderr,
+            )
+            return None
+        # Board default: --always-approve (Grok has no --yolo). Opt out with
+        # --no-always-approve for interactive permission prompts.
+        always = not getattr(args, "no_always_approve", False)
+        return GrokBackend(
+            plugin_dir=plugin_dir.resolve(),
+            grok_bin=grok_bin,
+            always_approve=always,
+            permission_mode=getattr(args, "grok_permission_mode", None)
+            or None,
+            model=getattr(args, "model", None),
+            max_turns=getattr(args, "max_turns", None),
+            kuru_py=kuru_py,
+        )
+
     print(
         f"error: backend {args.backend!r} not implemented yet "
-        f"(supported: mock, claude)",
+        f"(supported: mock, claude, grok)",
         file=sys.stderr,
     )
     return None
@@ -337,14 +362,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser(
         "run",
-        help="drive ready slices (--backend mock|claude; default mock)",
+        help="drive ready slices (--backend mock|claude|grok; default mock)",
     )
     _add_repo_flags(run_p, here)
     run_p.add_argument(
         "--backend",
         default="mock",
         choices=["mock", "claude", "grok", "cmd"],
-        help="stage worker (mock for tests; claude for live runs; grok/cmd later)",
+        help="stage worker (mock for tests; claude/grok for live; cmd later)",
     )
     run_p.add_argument(
         "--mock-scenario",
@@ -377,7 +402,39 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--model",
         default=None,
-        help="pass-through to claude --model",
+        help="pass-through model id (claude --model / grok -m)",
+    )
+    # Grok backend flags
+    run_p.add_argument(
+        "--grok-bin",
+        default=None,
+        metavar="PATH",
+        help="path to the grok CLI (default: PATH, ~/.local/bin/grok, ~/.grok/bin/grok)",
+    )
+    run_p.add_argument(
+        "--no-always-approve",
+        action="store_true",
+        help=(
+            "grok: do not pass --always-approve (board default is always-approve "
+            "for autonomous runs; Grok has no --yolo flag)"
+        ),
+    )
+    run_p.add_argument(
+        "--grok-permission-mode",
+        default=None,
+        metavar="MODE",
+        help=(
+            "grok --permission-mode (optional; default: omit and rely on "
+            "--always-approve). Values: default|acceptEdits|auto|dontAsk|"
+            "bypassPermissions|plan"
+        ),
+    )
+    run_p.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        metavar="N",
+        help="grok --max-turns (optional cap on agent turns per stage)",
     )
     run_p.add_argument(
         "--ui",

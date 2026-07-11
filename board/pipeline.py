@@ -9,7 +9,7 @@ from typing import Callable
 from board.backends.base import AgentBackend
 from board.events import EventWriter
 from board.ledger import KuruError, Ledger
-from board.prompts import stage_prompt, stage_role
+from board.prompts import stage_prompt_for, stage_role
 
 NEEDS_BUILD = frozenset({"ready", "in_progress", "rejected"})
 DEFAULT_MAX_NO_VERDICT = 2
@@ -176,11 +176,19 @@ class SlicePipeline:
     def _stage(self, rt: SliceRuntime, stage: str):
         sid = rt.id
         log_path = self.run_dir / sid / f"{stage}.log"
-        prompt = stage_prompt(stage, sid)
+        # Claude: slash commands. Grok: skill-on-disk + kuru.py (no slash discovery).
+        prompt = stage_prompt_for(
+            getattr(self.backend, "name", "claude"),
+            stage,
+            sid,
+            plugin_dir=getattr(self.backend, "plugin_dir", None),
+            kuru_py=getattr(self.backend, "kuru_py", None),
+        )
         t0_try = rt.tries
         self.events.emit("stage.started", id=sid, stage=stage, **{"try": t0_try})
         # Emit spawn *before* run_stage so the board can show a live agent row.
-        # Pid is usually unknown until exit for blocking backends (mock/claude).
+        # Pid is usually unknown until exit for blocking backends (mock/claude);
+        # Grok uses Popen and returns pid on backend.exited.
         role = stage_role(stage)
         self.events.emit(
             "backend.spawn",

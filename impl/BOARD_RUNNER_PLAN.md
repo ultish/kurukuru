@@ -1,6 +1,6 @@
 # Board Runner Plan — agent-agnostic multi-slice orchestration + TUI
 
-**Status:** Phase 0–3 implemented (plan + mock + Claude + hierarchical board TUI); Phase 3b Grok next  
+**Status:** Phase 0–3b implemented (plan + mock + Claude + hierarchical board TUI + Grok); Phase 4 next  
 **Created:** 2026-07-11  
 **Goal:** Port the *policy* of `/kuru:loop-workflow` into a portable Python control
 plane with pluggable agent backends (Claude, Grok, Pi, mock) and a Grok-like
@@ -504,19 +504,31 @@ discovery works; fallback to explicit “run kuru.py + load skill” instruction
 ### 9.3 Backend: grok
 
 ```bash
-grok -p "<prompt>" --cwd <repo> [permissions flags]
+grok -p "<prompt>" --cwd <repo> --always-approve [-m MODEL] …
 ```
 
-Prompt must be **self-contained** (no reliance on Claude plugin slash
-discovery):
+**Flags discovered (Grok Build CLI, 2026-07):**
 
-1. Resolve `KURU_PY` / plugin path.  
+| Flag | Role |
+|------|------|
+| `-p` / `--single <PROMPT>` | Headless single-turn; print response and exit |
+| `--cwd <DIR>` | Working directory (repo root) |
+| `--always-approve` | Auto-approve all tool executions (**board default**; Grok has **no** `--yolo`) |
+| `--permission-mode` | `default`\|`acceptEdits`\|`auto`\|`dontAsk`\|`bypassPermissions`\|`plan` (optional; board uses `--always-approve` unless `--no-always-approve`) |
+| `-m` / `--model` | Model id |
+| `--max-turns N` | Cap agent turns per stage |
+| Common bins | `PATH`, `~/.local/bin/grok`, `~/.grok/bin/grok`, Homebrew |
+
+Prompt must be **self-contained** (no reliance on Claude plugin slash
+discovery) — `board.prompts.stage_prompt_grok`:
+
+1. Resolve `KURU_PY` / plugin path (`CLAUDE_PLUGIN_ROOT` still set for skill paths).  
 2. Read the relevant skill file under plugin `skills/…`.  
 3. Perform the stage.  
-4. End with `kuru show <id>` / ensure ledger transition recorded.
+4. End with `kuru show <id>` / ensure ledger transition recorded
+   (ship: `set-status done --no-commit`).
 
-Document exact flags after one live experiment (`--yolo` / permission mode,
-streaming). Capture findings in this file’s §15 Session log.
+Live smoke needs `grok login` (or equivalent); CI uses mock + unit tests only.
 
 ### 9.4 Backend: cmd
 
@@ -997,6 +1009,36 @@ Use this section when resuming mid-build.
 - Notes: cancel (`c`) still stub; live pid for claude stages still None until
   backend uses Popen (spawn event fires pre-stage with pid=None).  
 
+### 2026-07-11 — Phase 3b implemented (Grok backend)
+
+- **Delivered:**
+  - `board/backends/grok.py` — `find_grok`, `GrokBackend.run_stage` via
+    `grok -p` + `Popen` (pid on `backend.exited`); env `KURU_PY` +
+    `CLAUDE_PLUGIN_ROOT`
+  - `board/prompts.py` — `stage_prompt_claude` (slash) + `stage_prompt_grok`
+    (skill path + kuru.py + status rules); pipeline selects via
+    `stage_prompt_for(backend.name, …)`
+  - CLI: `--backend grok`, `--grok-bin`, `--no-always-approve`,
+    `--grok-permission-mode`, `--max-turns`, shared `--model`
+  - Selftest: find_grok / missing bin / dry-run / prompt content / fake-binary
+    Popen pid (no live Grok API)
+- **Flags (live CLI help):** `-p/--single`, `--cwd`, `--always-approve`
+  (not `--yolo`), `--permission-mode`, `-m/--model`, `--max-turns`; bins under
+  `~/.local/bin/grok` and `~/.grok/bin/grok`
+- **How to invoke:**
+  ```bash
+  PYTHONPATH=. python3 -m board run --backend grok -y --repo <ws> \
+    --plugin-dir /path/to/kurukuru --ui board
+  # Optional: --grok-bin PATH --model <id> --max-turns 40 --no-always-approve
+  # Dry-run / CI: no grok binary or login required
+  PYTHONPATH=. python3 -m board run --backend grok -y --repo <ws> --dry-run
+  ```
+- **Live smoke:** requires `grok` CLI installed and logged in; drives at least
+  one slice build→verify with skill-based prompts. CI stays on `--backend mock`.
+- Next: **Phase 4** cancel / contract repair / loop-workflow shell-out / cmd-Pi  
+- Notes: spawn event still fires with `pid=None` pre-stage (same as Claude);
+  Grok returns real pid on `backend.exited`.  
+
 ---
 
 ## 16. Acceptance criteria (whole project)
@@ -1037,8 +1079,8 @@ ls board 2>/dev/null || echo "board/ not started"
 
 **Priority order if time is short:**  
 Phase 0 → Phase 1 (mock+scheduler) → **Phase 3 hierarchical board** → Phase 2 Claude
-→ Phase 3b Grok.  
-(Board can be validated entirely with mock; agent backends plug in under the same UI.)
+→ Phase 4 polish (cancel, repair, cmd/Pi, loop-workflow shell-out).  
+(Board can be validated entirely with mock; Claude/Grok plug in under the same UI.)
 
 ---
 
