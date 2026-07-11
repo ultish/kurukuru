@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RHEL 9 TUI release build:** `tui/Dockerfile.rhel9` (Rocky 9 / glibc-matched,
+  `x86_64-unknown-linux-gnu` only) and `scripts/build-tui-rhel9.sh` →
+  `dist/kuru-board-tui-x86_64-unknown-linux-gnu` + `SHA256SUMS` for GitHub Release
+  attach. Guide: `docs/airgap-tui.md`. macOS continues to build from source.
 - **`.kuru/BOARD_HANDOFF.md`** — agent-tab briefing (orient ritual + latest board run).
   Seeded by `kuru init` from `templates/board-handoff.md`; rewritten after each
   `board run`. `progress.md` / bearings point at it.

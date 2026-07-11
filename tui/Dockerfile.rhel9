@@ -1,0 +1,65 @@
+# Build kuru-board-tui for RHEL 9–class glibc (x86_64 only).
+#
+# Rocky Linux 9 ≈ RHEL 9 glibc. Building here avoids "GLIBC_2.xx not found"
+# when the binary is later run on air-gapped RHEL 9.
+#
+# Target triple (when built with --platform=linux/amd64):
+#   x86_64-unknown-linux-gnu
+#
+# IMPORTANT — build context is the tui/ directory (not the repo root):
+#
+#   # from repo root (recommended):
+#   ./scripts/build-tui-rhel9.sh
+#
+#   # manual:
+#   docker build --platform linux/amd64 -f tui/Dockerfile.rhel9 -t kuru-board-tui:rhel9 tui/
+#   container build --platform linux/amd64 -f tui/Dockerfile.rhel9 -t kuru-board-tui:rhel9 tui/
+#
+# On Apple Silicon you MUST pass --platform linux/amd64 (x86_64). Without working
+# amd64 emulation you get: exec /bin/sh: exec format error
+# Prefer Apple Container (DOCKER=container) if Docker's qemu/Rosetta is broken.
+#
+# Artifact inside the image:
+#   /out/kuru-board-tui-linux-amd64          (clear platform name)
+#   /out/kuru-board-tui                      (short name)
+#   /out/SHA256SUMS
+
+# Platform comes from `docker/container build --platform=…` (do not hardcode
+# FROM --platform=linux/amd64 — BuildKit warns and some runtimes mishandle it).
+FROM rockylinux:9
+
+# Rocky 9 images ship curl-minimal, which conflicts with package "curl".
+# rustup works with curl-minimal (provides /usr/bin/curl).
+RUN dnf install -y gcc gcc-c++ make \
+    && dnf clean all \
+    && command -v curl >/dev/null \
+    && curl --version | head -1
+
+# Rust stable (network required at image-build time only)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal \
+    && . /root/.cargo/env \
+    && rustc --version \
+    && rustc -vV | grep host
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu
+
+WORKDIR /src
+
+# Context is tui/ (Cargo.toml + src/ at the root of the context)
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+# Explicit target for clarity when platform is linux/amd64
+RUN rustup target add x86_64-unknown-linux-gnu \
+    && cargo build --release --target x86_64-unknown-linux-gnu \
+    && mkdir -p /out \
+    && cp target/x86_64-unknown-linux-gnu/release/kuru-board-tui /out/kuru-board-tui \
+    && cp /out/kuru-board-tui /out/kuru-board-tui-linux-amd64 \
+    && (cd /out && sha256sum kuru-board-tui kuru-board-tui-linux-amd64 > SHA256SUMS) \
+    && ls -la /out \
+    && (command -v file >/dev/null && file /out/kuru-board-tui-linux-amd64 || true) \
+    && (command -v ldd >/dev/null && ldd /out/kuru-board-tui-linux-amd64 || true)
+
+CMD ["cat", "/out/SHA256SUMS"]

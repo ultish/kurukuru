@@ -9,6 +9,8 @@ Do NOT rely on anything from earlier chat; reconstruct state from files:
 
 1. Read `.kuru/progress.md` (current state, last session, the stated next action,
    known landmines, how to run/verify).
+1b. If present, read `.kuru/BOARD_HANDOFF.md` — board/TUI handoff for a new agent
+   tab (latest run id, backend, summary/events paths, stuck slices).
 2. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" doctor` — confirm the workspace
    is healthy.
 3. `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" ls` and `... next`.

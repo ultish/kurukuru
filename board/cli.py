@@ -104,6 +104,7 @@ def _append_progress(repo: Path, run_id: str, result: RunResult) -> None:
         line = (
             f"- {ts} board run `{run_id}`: shipped [{shipped}]; "
             f"capped [{capped_s}]; stuck [{stuck_s}]\n"
+            f"  → see `.kuru/BOARD_HANDOFF.md` for the full board handoff\n"
         )
         text = path.read_text(encoding="utf-8")
         if not text.endswith("\n"):
@@ -111,7 +112,6 @@ def _append_progress(repo: Path, run_id: str, result: RunResult) -> None:
         path.write_text(text + line, encoding="utf-8")
     except OSError:
         pass
-
 
 def cmd_run(args: argparse.Namespace) -> int:
     repo, kuru_py, ledger = _common_repo_plugin(args)
@@ -231,8 +231,18 @@ def cmd_run(args: argparse.Namespace) -> int:
                 ev.emit("commit.finished", ok=ok, detail=detail_s)
                 result_box["commit_detail"] = detail_s
                 result_box["commit_ok"] = ok
-            # Best-effort progress.md line (never fails the run)
+            # Best-effort progress.md line + agent-oriented BOARD_HANDOFF.md
             _append_progress(repo, run_id, res)
+            from board.handoff import write_board_handoff
+
+            write_board_handoff(
+                repo,
+                run_id=run_id,
+                run_dir=run_dir,
+                result=res,
+                backend=getattr(args, "backend", "") or "",
+                review=plan.review,
+            )
 
         if use_board:
             # Interactive: scheduler on a worker; main thread owns the TTY.
@@ -268,12 +278,14 @@ def cmd_run(args: argparse.Namespace) -> int:
                 f"stuck={result.stuck} blocked_at_start={result.blocked_at_start}"
             )
             print(f"events: {run_dir / 'events.ndjson'}")
+            print(f"handoff: {repo / '.kuru' / 'BOARD_HANDOFF.md'}")
         else:
             # After board restores the terminal, print a one-line summary.
             print(
                 f"summary: shipped={result.shipped} capped={result.capped} "
                 f"stuck={result.stuck}  events: {run_dir / 'events.ndjson'}"
             )
+            print(f"handoff: {repo / '.kuru' / 'BOARD_HANDOFF.md'}")
 
         return result.exit_code()
 

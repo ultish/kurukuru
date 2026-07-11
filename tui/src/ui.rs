@@ -407,13 +407,23 @@ fn draw_overview_body(
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
-    let items: Vec<ListItem> = rows
-        .iter()
-        .map(|r| {
-            let style = row_style(board, r);
-            ListItem::new(Line::from(Span::styled(r.label.clone(), style)))
-        })
-        .collect();
+    let items: Vec<ListItem> = if rows.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            if board.finished || !board.last_detail.is_empty() {
+                "(no slices in this run — board may already be clear; press s after new slices)"
+            } else {
+                "(no run loaded yet — press s to start, or wait for events)"
+            },
+            Style::default().fg(Color::DarkGray),
+        )))]
+    } else {
+        rows.iter()
+            .map(|r| {
+                let style = row_style(board, r);
+                ListItem::new(Line::from(Span::styled(r.label.clone(), style)))
+            })
+            .collect()
+    };
 
     let list = List::new(items)
         .block(

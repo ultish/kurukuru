@@ -15,6 +15,11 @@
 # Or open a finished run:
 #   ./scripts/board-tui.sh --run-dir ~/Developer/kuru-test/.kuru/runs/r_abc --no-follow
 #
+# RHEL 9 / airgap Linux x86_64 (prebuilt via Docker Rocky 9):
+#   ./scripts/build-tui-rhel9.sh
+#   → dist/kuru-board-tui-x86_64-unknown-linux-gnu  (attach to GitHub Release)
+#   See docs/airgap-tui.md
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

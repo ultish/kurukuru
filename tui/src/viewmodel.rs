@@ -606,6 +606,34 @@ fn on_planned(state: &mut BoardState, event: &Value) {
         }
     }
 
+    // Already-done slices (board run with empty actionable set still lists these).
+    // Without this, a "nothing to do" run leaves the TUI blank.
+    for sid in string_list(event.get("done_ids")) {
+        if state.slices.contains_key(&sid) {
+            if let Some(sl) = state.slices.get_mut(&sid) {
+                sl.finished = true;
+                sl.started = true;
+                sl.outcome = Some("shipped".into());
+                if sl.ledger_status.is_empty() {
+                    sl.ledger_status = "done".into();
+                }
+            }
+            continue;
+        }
+        let mut sl = SliceState::new(&sid, state.max_tries);
+        sl.title = sid.clone();
+        sl.ledger_status = "done".into();
+        sl.finished = true;
+        sl.started = true;
+        sl.outcome = Some("shipped".into());
+        sl.mutex_target = "default".into();
+        state.slices.insert(sid.clone(), sl);
+        let tgt = state.ensure_target("default");
+        if !tgt.slice_ids.contains(&sid) {
+            tgt.slice_ids.push(sid);
+        }
+    }
+
     let n_act = event
         .get("actionable")
         .and_then(|v| v.as_array())
@@ -616,16 +644,24 @@ fn on_planned(state: &mut BoardState, event: &Value) {
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
-    state.last_detail = format!(
-        "planned: {} actionable, {} waiting, review={}",
-        n_act,
-        n_wait,
-        if state.review == Some(true) {
-            "on"
-        } else {
-            "off"
-        }
-    );
+    let n_done = string_list(event.get("done_ids")).len();
+    state.last_detail = if n_act == 0 && n_wait == 0 && n_done > 0 {
+        format!(
+            "planned: board clear — {n_done} already done (nothing to build). Press s after adding slices."
+        )
+    } else {
+        format!(
+            "planned: {} actionable, {} waiting, {} done, review={}",
+            n_act,
+            n_wait,
+            n_done,
+            if state.review == Some(true) {
+                "on"
+            } else {
+                "off"
+            }
+        )
+    };
 }
 
 fn slice_mut<'a>(state: &'a mut BoardState, sid: &str) -> Option<&'a mut SliceState> {

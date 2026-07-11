@@ -45,11 +45,24 @@ drive_to_verified() {
 echo "== SL-1: init + new-slice scaffold =="
 newrepo >/dev/null
 expect_ok   "init scaffolds .kuru" $KURU init
-for f in config.json ledger.json charter.md progress.md README.md init.sh .gitignore; do
+for f in config.json ledger.json charter.md progress.md BOARD_HANDOFF.md README.md init.sh .gitignore; do
   [ -f ".kuru/$f" ] && ok "init wrote $f" || fail "init missing $f"
 done
+grep -q "Board handoff" .kuru/BOARD_HANDOFF.md && ok "BOARD_HANDOFF.md has orient content" || fail "BOARD_HANDOFF.md empty/wrong"
 grep -q "^engine$" .kuru/.gitignore && ok ".gitignore excludes machine-local engine path" || fail ".gitignore missing engine"
 grep -qE '^runs/?$' .kuru/.gitignore && ok ".gitignore excludes board runs/" || fail ".gitignore missing runs/"
+
+# init links existing AGENTS.md / CLAUDE.md (does not create them)
+newrepo >/dev/null
+printf '# Agents\n\nProject rules.\n' > AGENTS.md
+printf '# Claude\n\nProject memory.\n' > CLAUDE.md
+$KURU init >/dev/null
+grep -q "kurukuru:begin" AGENTS.md && grep -q "BOARD_HANDOFF.md" AGENTS.md \
+  && ok "init links Kurukuru into existing AGENTS.md" || fail "AGENTS.md not linked"
+grep -q "kurukuru:begin" CLAUDE.md && ok "init links Kurukuru into existing CLAUDE.md" || fail "CLAUDE.md not linked"
+$KURU init --force >/dev/null
+n=$(grep -c "kurukuru:begin" AGENTS.md || true)
+[ "$n" = "1" ] && ok "init does not duplicate AGENTS.md link" || fail "AGENTS.md link duplicated ($n)"
 [ -x ".kuru/init.sh" ] && ok "init.sh is executable" || fail "init.sh not executable"
 [ -f ".kuru/engine" ] && grep -q "kuru.py" .kuru/engine && ok "init records engine path (.kuru/engine)" || fail "engine path not recorded"
 expect_ok   "doctor healthy" $KURU doctor

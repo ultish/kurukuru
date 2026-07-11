@@ -151,6 +151,9 @@ st="$("${KURU[@]}" show SL-0001 --json | python3 -c 'import json,sys; print(json
 sum="$(ls .kuru/runs/*/summary.json | head -1)"
 python3 -c "import json; s=json.load(open('$sum')); assert s['shipped']==['SL-0001'], s" \
   && ok "summary.json lists shipped" || fail "summary wrong"
+[ -f .kuru/BOARD_HANDOFF.md ] && grep -q "Latest board run" .kuru/BOARD_HANDOFF.md \
+  && grep -q "summary.json" .kuru/BOARD_HANDOFF.md \
+  && ok "board run writes BOARD_HANDOFF.md" || fail "BOARD_HANDOFF.md missing/incomplete after run"
 
 echo "== Phase 1: verifying no_verdict re-verifies (no rebuild) =="
 repo4="$(newrepo)"

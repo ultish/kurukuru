@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+# Rust board TUI
+tui/target/
+
+# Release build outputs
+dist/

@@ -5,6 +5,10 @@ of every session.** It is the first thing the next session reads
 (`/kuru:bearings`). Treat it as the note you leave for a colleague who has none
 of your context._
 
+_For a **new agent tab next to the board TUI**, also read **`.kuru/BOARD_HANDOFF.md`**
+(orient steps + latest board run paths). Board runs append a one-liner below and
+rewrite that handoff file._
+
 ## Current state
 <!-- One paragraph: where the project stands right now. -->
 

@@ -17,6 +17,7 @@ charter -> spec -> slice -> build -> verify -> review -> done
 | `ledger.json` | Every slice + its status + full history. Single source of truth for state. | **machine** |
 | `charter.md` | Shared understanding. Precedes specs. | narrative |
 | `progress.md` | Cross-session handoff. Read first each session. | narrative |
+| `BOARD_HANDOFF.md` | Board / new-agent-tab briefing (orient + latest run). Rewritten after `board run`. | narrative |
 | `spec/<feature>.md` | One spec per feature/epic. | narrative |
 | `slices/<id>/slice.md` | The vertical-slice spec. | narrative |
 | `slices/<id>/contract.yml` | Frozen definition-of-done + acceptance criteria. | narrative (frozen) |

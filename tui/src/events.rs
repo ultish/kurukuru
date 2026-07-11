@@ -6,26 +6,59 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-/// Find the newest run dir under `.kuru/runs/`.
+/// Find the best run dir under `.kuru/runs/`.
+///
+/// Prefers runs that actually drove slices (have `slice.started` or non-empty
+/// actionable in events) over empty "board already clear" runs that are merely
+/// newer by mtime — those used to make the TUI look blank.
 pub fn latest_run_dir(repo: &Path) -> Option<PathBuf> {
     let runs = repo.join(".kuru").join("runs");
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    // score: (richness, mtime) — higher richness wins, then newer
+    let mut best: Option<(u8, std::time::SystemTime, PathBuf)> = None;
     let rd = std::fs::read_dir(&runs).ok()?;
     for ent in rd.flatten() {
         let p = ent.path();
         if !p.is_dir() {
             continue;
         }
-        if !p.join("events.ndjson").is_file() {
+        let ev = p.join("events.ndjson");
+        if !ev.is_file() {
             continue;
         }
         let meta = ent.metadata().ok()?;
         let m = meta.modified().or_else(|_| meta.created()).ok()?;
-        if best.as_ref().map(|(t, _)| m > *t).unwrap_or(true) {
-            best = Some((m, p));
+        let richness = run_event_richness(&ev);
+        let better = match &best {
+            None => true,
+            Some((br, bm, _)) => richness > *br || (richness == *br && m > *bm),
+        };
+        if better {
+            best = Some((richness, m, p));
         }
     }
-    best.map(|(_, p)| p)
+    best.map(|(_, _, p)| p)
+}
+
+/// 2 = drove work; 1 = has done_ids / finished summary; 0 = empty plan only
+fn run_event_richness(events_path: &Path) -> u8 {
+    let Ok(text) = std::fs::read_to_string(events_path) else {
+        return 0;
+    };
+    if text.contains("\"slice.started\"")
+        || text.contains("\"stage.started\"")
+        || text.contains("\"actionable\":[{")
+        || text.contains("\"actionable\": [{")
+    {
+        return 2;
+    }
+    if text.contains("\"done_ids\":[\"")
+        || text.contains("\"done_ids\": [\"")
+        || text.contains("\"shipped\":[\"")
+        || text.contains("\"shipped\": [\"")
+    {
+        return 1;
+    }
+    0
 }
 
 pub fn load_all_events(path: &Path) -> Result<Vec<Value>> {

@@ -23,6 +23,10 @@ addendum) win.
   `kuru-verifier`).
 - `skills/` — the methodology (deep guidance lives here, not in commands).
 - `templates/` — files copied into a target repo's `.kuru/` workspace by `kuru init`.
+- `board/` — agent-agnostic multi-slice orchestrator (`python3 -m board`).
+- `tui/` — Ratatui board UI (`kuru-board-tui`); airgap Linux amd64 builds via
+  `scripts/build-tui-rhel9.sh` → `dist/kuru-board-tui-linux-amd64.tar.gz`. Guide:
+  `tui/README.md`.
 - `runner.py` — standalone headless driver. **NOT part of the plugin**; it's a thin
   dispatcher over `kuru next --json` + the `/kuru:*` commands.
 - `.claude-plugin/` — `plugin.json` + `marketplace.json` manifests.
@@ -32,10 +36,10 @@ addendum) win.
 - **Stdlib only.** No third-party Python dependencies, ever. `kuru.py` and
   `runner.py` must run on a clean `python3`.
 - **Template filenames are load-bearing.** `kuru.py` reads templates by exact name
-  (`config.json`, `charter.md`, `progress.md`, `workspace-readme.md`, `slice.md`,
-  `contract.yml`, `build-log.md`, `verification.md`, `init.sh`, `config.<stack>.json`).
-  Renaming one without updating `kuru.py` crashes `init`/`new-slice` — that's the
-  fastest failure signal.
+  (`config.json`, `charter.md`, `progress.md`, `board-handoff.md`, `workspace-readme.md`,
+  `slice.md`, `contract.yml`, `build-log.md`, `verification.md`, `init.sh`,
+  `config.<stack>.json`). Renaming one without updating `kuru.py` crashes
+  `init`/`new-slice` — that's the fastest failure signal.
 - **The state machine lives in `kuru.py`** (`STATUSES`, `TRANSITIONS`,
   `STATUS_ACTION`, `pick_next`). If you change it, update every place that mirrors
   it: the diagrams in `README.md` and the `kuru-method` skill, and the command
@@ -72,3 +76,26 @@ implies ownership of the checklist; "someone else bumped it" is not an exception
    `.claude-plugin/marketplace.json` (top-level and `plugins[0]`).
 3. Use SemVer: bug fixes → patch, backward-compatible features → minor, breaking
    changes to the engine / state machine / template contract → major.
+4. **Board TUI Linux release asset (do not skip).** Air-gapped / RHEL 9 users
+   install the prebuilt binary; a version cut without it leaves them stranded.
+   - Build (repo root; Docker or Apple Container; network at build time):
+     ```bash
+     ./scripts/build-tui-rhel9.sh
+     ```
+     Prefer `DOCKER=docker` when the daemon is up; otherwise
+     `DOCKER=container` on Apple Silicon. Details: `tui/README.md`,
+     `docs/airgap-tui.md`.
+   - Confirm artifacts exist and look right:
+     - `dist/kuru-board-tui-linux-amd64.tar.gz` — **primary GitHub Release asset**
+     - `dist/SHA256SUMS`
+     - `file dist/kuru-board-tui-linux-amd64` → ELF 64-bit **x86-64** (not arm64)
+   - **Attach to the GitHub Release** for this tag (in addition to the plugin
+     source / marketplace packaging):
+     ```bash
+     gh release upload <tag> \
+       dist/kuru-board-tui-linux-amd64.tar.gz \
+       dist/SHA256SUMS
+     ```
+   - Mention the tarball in the release notes (RHEL 9–class glibc, x86_64 only;
+     unpack → `chmod +x kuru-board-tui`; macOS still builds from `tui/` source).
+   - Do **not** commit `dist/` (gitignored). The asset lives on the Release only.

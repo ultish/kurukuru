@@ -423,6 +423,10 @@ def cmd_init(args):
         ) + "\n",
         "charter.md": render(read_template("charter.md"), DATE=now(), PROJECT=root.name),
         "progress.md": render(read_template("progress.md"), DATE=now(), PROJECT=root.name),
+        # Agent tab next to the board TUI — rewritten after each `board run`.
+        "BOARD_HANDOFF.md": render(
+            read_template("board-handoff.md"), DATE=now(), PROJECT=root.name
+        ),
         "README.md": read_template("workspace-readme.md"),
         "init.sh": render(read_template("init.sh"), PROJECT=root.name),
         # .kuru/ is meant to be committed (it's the project's delivery memory);
@@ -444,6 +448,10 @@ def cmd_init(args):
         path.write_text(content)
         if name == "init.sh":
             path.chmod(0o755)
+
+    # Point existing project agent rules at Kurukuru (idempotent). Only touches
+    # files that already exist — never creates AGENTS.md / CLAUDE.md from scratch.
+    _link_kuru_in_project_rules(root)
 
     # Stash each profile under .kuru/profiles/ (committed guidance) for the charter
     # to read. Name files by their catalog name (file stem / blob name), de-duplicated.
@@ -475,6 +483,74 @@ def cmd_init(args):
     print("Next: run /kuru:charter (it reads .kuru/profiles/ as guidance if "
           "present, confirms it with you, then writes config.json), or edit "
           ".kuru/config.json gates by hand.")
+    print("Agent tab handoff: .kuru/BOARD_HANDOFF.md (also linked from AGENTS.md / "
+          "CLAUDE.md when those files already exist).")
+
+
+# Marker for idempotent inserts into repo-root AGENTS.md / CLAUDE.md
+_KURU_RULES_BEGIN = "<!-- kurukuru:begin -->"
+_KURU_RULES_END = "<!-- kurukuru:end -->"
+
+_KURU_RULES_BLOCK = f"""{_KURU_RULES_BEGIN}
+## Kurukuru (delivery harness)
+
+This repo uses a **Kurukuru** workspace under `.kuru/` (charter → spec → slices →
+build → verify → ship). Machine state is owned by `kuru.py` — do not hand-edit
+`ledger.json` or `gate-results.json`.
+
+**New agent / new tab (e.g. next to the board TUI):**
+1. Read `.kuru/BOARD_HANDOFF.md` (orient ritual + latest board run).
+2. Read `.kuru/progress.md` (cross-session handoff).
+3. Run `kuru doctor`, `kuru ls`, `kuru next` (via `python3` + path in `.kuru/engine`
+   or `KURU_PY`).
+
+**Board runs** write NDJSON under `.kuru/runs/` (gitignored) and refresh
+`BOARD_HANDOFF.md`. Prefer `/kuru:bearings` or the handoff file after a context reset.
+{_KURU_RULES_END}
+"""
+
+
+def _link_kuru_in_project_rules(root: Path) -> None:
+    """If AGENTS.md / CLAUDE.md already exist at repo root, append a Kurukuru pointer.
+
+    Never creates those files. Skips if the kurukuru marker is already present.
+    """
+    names = (
+        "AGENTS.md",
+        "agents.md",
+        "CLAUDE.md",
+        "Claude.md",
+        "claude.md",
+    )
+    seen: set[Path] = set()
+    linked: list[str] = []
+    for name in names:
+        path = root / name
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not path.is_file():
+            continue
+        seen.add(resolved)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _KURU_RULES_BEGIN in text:
+            continue
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + _KURU_RULES_BLOCK
+        if not text.endswith("\n"):
+            text += "\n"
+        try:
+            path.write_text(text, encoding="utf-8")
+            linked.append(name)
+        except OSError:
+            continue
+    if linked:
+        print(f"Linked Kurukuru handoff into: {', '.join(linked)}")
 
 
 def cmd_set_stack(args):
