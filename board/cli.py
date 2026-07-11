@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 from board import __version__
@@ -15,6 +16,7 @@ from board.ledger import Ledger, resolve_kuru_py
 from board.plan import build_plan, format_plan_text
 from board.preconditions import check_preconditions
 from board.scheduler import Scheduler
+from board.ui.board import BoardUI, board_available, make_run_ui
 from board.ui.plain import PlainUI
 
 
@@ -99,7 +101,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     next_all = ledger.next_all()
     plan = build_plan(next_all, scope=scope, max_tries=args.max_tries)
 
-    if args.ui != "json":
+    # Board TUI paints its own header; skip noisy plan dump on a real TTY board.
+    will_board = args.ui == "board" and board_available()
+    if args.ui != "json" and not will_board:
         print(format_plan_text(plan, repo=str(repo)))
         print()
 
@@ -116,8 +120,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    ui = PlainUI() if args.ui == "plain" else None
-    listeners = [ui.on_event] if ui else []
+    # Board UI needs a pause Event shared with the scheduler; plain/json ignore it.
+    pause_event = threading.Event()
+    ui_name = args.ui
+    if ui_name == "board" and not board_available():
+        # make_run_ui also falls back; note once here for dry-run path
+        pass
+    ui = make_run_ui(ui_name, run_dir=run_dir, pause_event=pause_event)
+    listeners = [ui.on_event] if ui is not None else []
+    use_board = isinstance(ui, BoardUI)
 
     with EventWriter(run_dir, run_id, listeners=listeners) as ev:
         ev.write_json(
@@ -130,12 +141,20 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "scope": scope,
                 "review": plan.review,
                 "command": "run",
+                "ui": ui_name if not use_board and ui_name == "board" else (
+                    "board" if use_board else ui_name
+                ),
             },
         )
+        # For interactive board, suppress the pre-run plan dump to stdout (board paints).
+        if not use_board and args.ui != "json":
+            pass  # plan already printed above
         ev.emit("run.planned", **plan.to_event_payload())
         ev.emit("run.started", run_id=run_id, backend=args.backend, review=plan.review)
 
         if args.dry_run:
+            if use_board:
+                ui.drain_and_paint_once()
             print("(dry-run — not starting pipelines)")
             return 0
 
@@ -150,34 +169,70 @@ def cmd_run(args: argparse.Namespace) -> int:
             run_dir=run_dir,
             review=plan.review,
             max_tries=args.max_tries,
+            pause_event=pause_event if use_board else None,
         )
-        result = sched.run(plan)
-        ev.write_json("summary.json", result.to_summary())
 
-        # Deferred commit if anything shipped
-        if result.shipped and not args.no_commit:
-            msg = args.commit_message or (
-                f"kuru: board run {run_id} — ship {', '.join(result.shipped)}"
-            )
-            ev.emit("commit.started", message=msg, slices=result.shipped)
-            proc = ledger.commit(message=msg, slices=result.shipped)
-            ok = proc.returncode == 0
-            detail = (proc.stdout or proc.stderr or "").strip().splitlines()
-            detail_s = detail[-1] if detail else ""
-            ev.emit("commit.finished", ok=ok, detail=detail_s)
-            # Assert runs/ not in last commit when possible
-            if ok and args.ui == "plain":
-                print(f"deferred commit: {detail_s or 'ok'}")
+        result_box: dict = {}
+
+        def _run_sched() -> None:
+            result_box["result"] = sched.run(plan)
+            res = result_box["result"]
+            ev.write_json("summary.json", res.to_summary())
+            # Deferred commit if anything shipped
+            if res.shipped and not args.no_commit:
+                msg = args.commit_message or (
+                    f"kuru: board run {run_id} — ship {', '.join(res.shipped)}"
+                )
+                ev.emit("commit.started", message=msg, slices=res.shipped)
+                proc = ledger.commit(message=msg, slices=res.shipped)
+                ok = proc.returncode == 0
+                detail = (proc.stdout or proc.stderr or "").strip().splitlines()
+                detail_s = detail[-1] if detail else ""
+                ev.emit("commit.finished", ok=ok, detail=detail_s)
+                result_box["commit_detail"] = detail_s
+                result_box["commit_ok"] = ok
+
+        if use_board:
+            # Interactive: scheduler on a worker; main thread owns the TTY.
+            # Suppress the plan dump already printed — clear and hand off to board.
+            thr = threading.Thread(target=_run_sched, name="board-scheduler", daemon=True)
+            thr.start()
+            try:
+                ui.run_loop(done=lambda: not thr.is_alive())
+            finally:
+                # Never leave the scheduler wedged on pause after UI exit.
+                pause_event.clear()
+                thr.join(timeout=3600)
+            result = result_box.get("result")
+            if result is None:
+                print("error: scheduler did not finish", file=sys.stderr)
+                return 2
+        else:
+            _run_sched()
+            result = result_box["result"]
+            if (
+                result.shipped
+                and not args.no_commit
+                and args.ui == "plain"
+                and result_box.get("commit_ok")
+            ):
+                print(f"deferred commit: {result_box.get('commit_detail') or 'ok'}")
 
         if args.ui == "json":
             print(json.dumps(result.to_summary(), indent=2))
-        else:
+        elif not use_board:
             print()
             print(
                 f"summary: shipped={result.shipped} capped={result.capped} "
                 f"stuck={result.stuck} blocked_at_start={result.blocked_at_start}"
             )
             print(f"events: {run_dir / 'events.ndjson'}")
+        else:
+            # After board restores the terminal, print a one-line summary.
+            print(
+                f"summary: shipped={result.shipped} capped={result.capped} "
+                f"stuck={result.stuck}  events: {run_dir / 'events.ndjson'}"
+            )
 
         return result.exit_code()
 
@@ -327,8 +382,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--ui",
         default="plain",
-        choices=["plain", "json"],
-        help="progress UI (board TUI is Phase 3)",
+        choices=["plain", "board", "json"],
+        help="progress UI: plain (CI), board (hierarchical TTY), json (summary only)",
     )
     run_p.add_argument("--yes", "-y", action="store_true", help="skip approval prompt")
     run_p.add_argument("--dry-run", action="store_true", help="plan only, do not run")

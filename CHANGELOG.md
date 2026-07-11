@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Board runner (Phase 0+1+2):** top-level `board/` package — agent-agnostic multi-slice
+- **Board runner (Phase 0+1+2+3):** top-level `board/` package — agent-agnostic multi-slice
   driver. See `impl/BOARD_RUNNER_PLAN.md`.
   - **Phase 0:** `python3 -m board plan` — target-mutex plan (`null` → `default`),
     `run.planned` NDJSON under `.kuru/runs/<run_id>/`.
@@ -20,13 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ported from `runner.py` dispatch. Multi-target concurrency comes from the board
     scheduler (superset of sequential `runner.py`). Flags: `--claude-bin`,
     `--permission-mode`, `--model`, `--settings`, `--allowed-tools`.
+  - **Phase 3:** `python3 -m board run --ui board` — hierarchical ANSI TUI (stdlib):
+    target lanes → slices → stages → agents; j/k select, expand/collapse, Enter
+    drill-in with log tail, `w` waiting filter, `l` pager, `p` pause new starts,
+    `?` help, `q` quit. Non-TTY falls back to plain. Pure view-model
+    (`board/ui/viewmodel.py`) unit-tested from event sequences.
   - **`board/prompts.py`** — stage → slash-command prompts (ship always `--no-commit`).
 - **`kuru commit`:** deferred batch commit after `set-status done --no-commit`
   (shared `git add -A` helper with per-slice ship).
 - **`.kuru/.gitignore` seeds `runs/`** so board run logs are never swept into commits;
   `kuru doctor` warns if an older workspace is missing that line.
 - **`scripts/board-selftest.sh`** — plan, mock run, serial/parallel, verifying policy,
-  cap, deferred-commit isolation, Claude backend unit checks (no live API).
+  cap, deferred-commit isolation, Claude backend unit checks, Phase 3 view-model +
+  board non-TTY fallback (no live API).
 
 ### Changed
 - **`kuru next --all --json` waiting entries** now include `target` (and `depends_on` /

@@ -1,6 +1,6 @@
 # Board Runner Plan — agent-agnostic multi-slice orchestration + TUI
 
-**Status:** Phase 0–2 implemented (plan + mock run + Claude backend); Phase 3 TUI next  
+**Status:** Phase 0–3 implemented (plan + mock + Claude + hierarchical board TUI); Phase 3b Grok next  
 **Created:** 2026-07-11  
 **Goal:** Port the *policy* of `/kuru:loop-workflow` into a portable Python control
 plane with pluggable agent backends (Claude, Grok, Pi, mock) and a Grok-like
@@ -971,6 +971,31 @@ Use this section when resuming mid-build.
 - Next: **Phase 3** hierarchical board TUI (`--ui board`)  
 - Notes: live Claude login still required for a real run; CI only exercises the dry
   path. `runner.py` is not deleted — board is the multi-target path.  
+
+### 2026-07-11 — Phase 3 implemented (hierarchical board TUI)
+
+- Phase: **3 done**  
+- Done:  
+  - `board/ui/viewmodel.py` — pure `apply_event(state, event)`; tree: targets →
+    slices → stages → agents; waiting mutex/deps; ledger status only from events  
+  - `board/ui/board.py` — stdlib ANSI board; non-TTY → plain via `make_run_ui`  
+  - CLI: `--ui board` (also `plain` / `json`); scheduler `pause_event` for `p`  
+  - Pipeline emits `backend.spawn` *before* `run_stage` so agent rows can go live  
+  - Selftest: view-model sequences (two targets busy, mutex waiter, dep waiter,
+    agent on spawn) + non-TTY board fallback  
+- **Keybinds:** `j/k` select · `h`/`←` collapse · `→`/space expand · `Enter` drill ·
+  `Esc` back · `l` log/$PAGER · `w` waiting filter · `p` pause new starts ·
+  `c` cancel stub · `q` quit · `?` help  
+- **How to invoke:**
+  ```bash
+  PYTHONPATH=. python3 -m board run --backend mock --ui board -y --repo <ws> \
+    --plugin-dir /path/to/kurukuru
+  # Off-TTY / CI: falls back to plain automatically
+  PYTHONPATH=. python3 -m board run --backend mock --ui board -y --repo <ws> </dev/null
+  ```
+- Next: **Phase 3b** Grok backend (optional), or Phase 4 cancel / loop-workflow shell-out  
+- Notes: cancel (`c`) still stub; live pid for claude stages still None until
+  backend uses Popen (spawn event fires pre-stage with pid=None).  
 
 ---
 

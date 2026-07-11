@@ -9,7 +9,8 @@ from typing import Callable
 from board.backends.base import AgentBackend
 from board.events import EventWriter
 from board.ledger import KuruError, Ledger
-from board.prompts import stage_prompt
+from board.prompts import stage_prompt, stage_role
+
 NEEDS_BUILD = frozenset({"ready", "in_progress", "rejected"})
 DEFAULT_MAX_NO_VERDICT = 2
 DEFAULT_MAX_PIPELINE_ITERS = 20
@@ -178,6 +179,17 @@ class SlicePipeline:
         prompt = stage_prompt(stage, sid)
         t0_try = rt.tries
         self.events.emit("stage.started", id=sid, stage=stage, **{"try": t0_try})
+        # Emit spawn *before* run_stage so the board can show a live agent row.
+        # Pid is usually unknown until exit for blocking backends (mock/claude).
+        role = stage_role(stage)
+        self.events.emit(
+            "backend.spawn",
+            id=sid,
+            stage=stage,
+            backend=self.backend.name,
+            pid=None,
+            role=role,
+        )
 
         result = self.backend.run_stage(
             stage=stage,
@@ -185,14 +197,6 @@ class SlicePipeline:
             prompt=prompt,
             cwd=self.ledger.repo,
             log_path=log_path,
-        )
-        self.events.emit(
-            "backend.spawn",
-            id=sid,
-            stage=stage,
-            backend=self.backend.name,
-            pid=result.pid,
-            role=result.role or stage,
         )
         self.events.emit(
             "backend.exited",

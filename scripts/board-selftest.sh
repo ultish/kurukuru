@@ -367,6 +367,69 @@ else
   cat /tmp/br-claude-dry.$$ | tail -10
 fi
 
+echo "== Phase 3: viewmodel unit tests (no TTY) =="
+if python3 -m board.ui.test_viewmodel; then
+  ok "viewmodel: two targets busy + mutex/dep waiters + agent spawn"
+else
+  fail "viewmodel unit tests"
+fi
+
+echo "== Phase 3: --ui board non-TTY falls back to plain =="
+repo_b="$(newrepo)"
+seed_workspace "$repo_b"
+cd "$repo_b"
+"${KURU[@]}" new-slice "Board UI" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+# Force non-TTY: redirect stdin/stdout away from a terminal
+if "${BOARD[@]}" run --repo "$repo_b" --plugin-dir "$ROOT" -y --backend mock \
+    --ui board --no-commit </dev/null >/tmp/br-board-nontty.$$ 2>/tmp/br-board-nontty-err.$$; then
+  :
+else
+  # mock run should still succeed even if UI falls back
+  fail "board non-TTY run exited non-zero"
+  cat /tmp/br-board-nontty-err.$$ | tail -15
+fi
+grep -qi 'falling back to plain\|TTY' /tmp/br-board-nontty-err.$$ \
+  && ok "board non-TTY: fallback note on stderr" \
+  || { fail "board non-TTY: missing fallback note"; cat /tmp/br-board-nontty-err.$$ | tail -10; }
+# plain-style event lines should appear on stdout
+grep -qE 'run started|planned:|SL-0001' /tmp/br-board-nontty.$$ \
+  && ok "board non-TTY: plain event stream on stdout" \
+  || { fail "board non-TTY: no plain output"; head -20 /tmp/br-board-nontty.$$; }
+st="$("${KURU[@]}" show SL-0001 --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+[ "$st" = "done" ] && ok "board non-TTY mock run still ships" || fail "status=$st after board fallback"
+
+echo "== Phase 3: make_run_ui + board_available helpers =="
+python3 - <<'PY'
+from board.ui.board import board_available, make_run_ui
+from board.ui.plain import PlainUI
+from board.ui.board import BoardUI
+
+# non-interactive make_run_ui("board") must not raise; returns PlainUI off-TTY
+ui = make_run_ui("board", run_dir=None)
+assert ui is not None
+# When not a TTY (this script redirects in CI-ish), expect PlainUI
+import sys
+if not (sys.stdout.isatty() and sys.stdin.isatty()):
+    assert isinstance(ui, PlainUI), type(ui)
+plain = make_run_ui("plain")
+assert isinstance(plain, PlainUI)
+assert make_run_ui("json") is None
+print("make_run_ui ok", "tty" if board_available() else "nontty")
+PY
+[ $? -eq 0 ] && ok "make_run_ui factory" || fail "make_run_ui factory"
+
+echo "== Phase 3: mock run --ui plain still green (regression) =="
+repo_r="$(newrepo)"
+seed_workspace "$repo_r"
+cd "$repo_r"
+"${KURU[@]}" new-slice "Regress" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+"${BOARD[@]}" run --repo "$repo_r" --plugin-dir "$ROOT" -y --backend mock --ui plain --no-commit \
+  >/tmp/br-plain-reg.$$ 2>&1 \
+  && ok "plain UI mock run still works" \
+  || { fail "plain UI regression"; tail -20 /tmp/br-plain-reg.$$; }
+
 echo
 echo "board selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

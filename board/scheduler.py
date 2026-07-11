@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +60,7 @@ class Scheduler:
         review: bool,
         max_tries: int = 2,
         max_workers: int | None = None,
+        pause_event: threading.Event | None = None,
     ):
         self.ledger = ledger
         self.backend = backend
@@ -68,6 +70,8 @@ class Scheduler:
         self.max_tries = max_tries
         self.max_workers = max_workers or 8
         self._lock = threading.Lock()
+        # When set, do not start *new* pipelines (in-flight continue). Board `p`.
+        self.pause_event = pause_event
 
     def run(self, plan: BoardPlan) -> RunResult:
         out = RunResult(
@@ -127,8 +131,8 @@ class Scheduler:
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
             while True:
-                # Start every runnable free-target slice
-                started = False
+                # Start every runnable free-target slice (unless pause_event is set)
+                paused = bool(self.pause_event is not None and self.pause_event.is_set())
                 with self._lock:
                     seen_targets: set[str] = set()
                     for sid, rt in roster.items():
@@ -163,16 +167,32 @@ class Scheduler:
                                 detail=t,
                             )
                             continue
+                        if paused:
+                            # Deps met + target free but operator paused new starts
+                            self.events.emit(
+                                "slice.waiting",
+                                id=sid,
+                                reason="paused",
+                                detail="operator pause",
+                            )
+                            continue
                         busy.add(t)
                         seen_targets.add(t)
                         fut = pool.submit(drive_one, rt)
                         running[sid] = fut
-                        started = True
 
                 if not running:
+                    if paused:
+                        # Idle while paused: wait for operator to resume
+                        time.sleep(0.2)
+                        continue
                     break
 
-                done_futs, _ = wait(list(running.values()), return_when=FIRST_COMPLETED)
+                done_futs, _ = wait(
+                    list(running.values()),
+                    return_when=FIRST_COMPLETED,
+                    timeout=0.5 if paused else None,
+                )
                 for sid, fut in list(running.items()):
                     if fut not in done_futs:
                         continue
