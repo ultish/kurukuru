@@ -572,6 +572,222 @@ PY
 [ $? -eq 0 ] && ok "GrokBackend Popen: pid set + log captures command" \
   || fail "GrokBackend Popen unit"
 
+echo "== Phase 4: cancel (mock mid-stage) =="
+repo_c="$(newrepo)"
+seed_workspace "$repo_c"
+cd "$repo_c"
+echo '{"default":{"sleep_ms":800}}' > sc-cancel.json
+"${KURU[@]}" new-slice "Cancel me" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+# Cancel from a side thread after stage starts (sleep_ms gives a window)
+python3 - <<PY
+import json, threading, time
+from pathlib import Path
+from board.cancel import RunControl
+from board.backends.mock import MockBackend, load_mock_scenarios
+from board.events import EventWriter, new_run_id
+from board.ledger import Ledger, resolve_kuru_py
+from board.plan import build_plan
+from board.scheduler import Scheduler
+
+repo = Path("$repo_c")
+kuru_py = resolve_kuru_py(Path("$ROOT"))
+ledger = Ledger(repo, kuru_py)
+control = RunControl()
+scenarios = load_mock_scenarios(Path("sc-cancel.json"))
+backend = MockBackend(ledger, scenarios, control=control)
+run_id = new_run_id()
+run_dir = repo / ".kuru" / "runs" / run_id
+run_dir.mkdir(parents=True, exist_ok=True)
+plan = build_plan(ledger.next_all(), max_tries=2)
+
+def cancel_soon():
+    time.sleep(0.15)
+    msg = control.request_cancel("SL-0001")
+    print("cancel_msg:", msg)
+
+thr = threading.Thread(target=cancel_soon, daemon=True)
+thr.start()
+with EventWriter(run_dir, run_id) as ev:
+    sched = Scheduler(
+        ledger=ledger, backend=backend, events=ev, run_dir=run_dir,
+        review=plan.review, max_tries=2, control=control, skip_check=True,
+    )
+    result = sched.run(plan)
+thr.join(timeout=5)
+assert result.results["SL-0001"].outcome == "stuck", result.to_summary()
+assert "cancel" in (result.results["SL-0001"].reason or ""), result.to_summary()
+# Ledger left as-is (not done) — cancel must not corrupt
+st = ledger.show("SL-0001")["status"]
+assert st != "done", st
+print("cancel ok status=", st, "reason=", result.results["SL-0001"].reason)
+PY
+[ $? -eq 0 ] && ok "cancel: mock stuck with reason cancelled, ledger not done" \
+  || fail "cancel path"
+
+# Pre-cancel before pipeline: immediate stuck
+python3 - <<PY
+from pathlib import Path
+from board.cancel import RunControl
+from board.backends.mock import MockBackend
+from board.events import EventWriter, new_run_id
+from board.ledger import Ledger, resolve_kuru_py
+from board.plan import build_plan
+from board.scheduler import Scheduler
+
+repo = Path("$repo_c")
+# Use a fresh slice
+import subprocess
+subprocess.check_call(
+    ["python3", str(Path("$ROOT") / "scripts" / "kuru.py"), "new-slice", "Pre cancel"],
+    cwd=repo, stdout=subprocess.DEVNULL,
+)
+subprocess.check_call(
+    ["python3", str(Path("$ROOT") / "scripts" / "kuru.py"), "set-status", "SL-0002", "ready"],
+    cwd=repo, stdout=subprocess.DEVNULL,
+)
+kuru_py = resolve_kuru_py(Path("$ROOT"))
+ledger = Ledger(repo, kuru_py)
+control = RunControl()
+control.request_cancel("SL-0002")
+backend = MockBackend(ledger, control=control)
+run_id = new_run_id()
+run_dir = repo / ".kuru" / "runs" / run_id
+run_dir.mkdir(parents=True, exist_ok=True)
+plan = build_plan(ledger.next_all(), scope=["SL-0002"], max_tries=2)
+with EventWriter(run_dir, run_id) as ev:
+    result = Scheduler(
+        ledger=ledger, backend=backend, events=ev, run_dir=run_dir,
+        review=plan.review, control=control,
+    ).run(plan)
+r = result.results.get("SL-0002") or type("R", (), {"outcome": None, "reason": None})()
+# either in results or stuck list
+assert any(s.get("id") == "SL-0002" for s in result.stuck) or (r and r.outcome == "stuck"), result.to_summary()
+print("pre-cancel ok")
+PY
+[ $? -eq 0 ] && ok "cancel: pre-cancel before start → stuck" || fail "pre-cancel"
+
+echo "== Phase 4: cmd backend construct + dry expand =="
+python3 - <<'PY'
+from pathlib import Path
+import tempfile
+from board.backends.cmd import CmdBackend
+
+be = CmdBackend(
+    "echo STAGE={stage} SLICE={slice} FILE={prompt_file} CWD={cwd}",
+    kuru_py=Path("/tmp/kuru.py"),
+)
+expanded = be.expand(
+    prompt="hello",
+    prompt_file="/tmp/p.md",
+    cwd="/tmp/repo",
+    slice_id="sl-0001",
+    stage="build",
+)
+assert "STAGE=build" in expanded
+assert "SLICE=SL-0001" in expanded
+assert "FILE=/tmp/p.md" in expanded
+assert "CWD=/tmp/repo" in expanded
+
+td = Path(tempfile.mkdtemp())
+log = td / "build.log"
+res = be.run_stage(
+    stage="build",
+    slice_id="SL-0001",
+    prompt="do the thing",
+    cwd=td,
+    log_path=log,
+)
+assert res.exit_code == 0, res
+assert log.is_file()
+assert (td / "build.prompt.md").is_file()
+assert "do the thing" in (td / "build.prompt.md").read_text()
+text = log.read_text()
+assert "STAGE=build" in text or "build" in text
+print("cmd backend ok")
+PY
+[ $? -eq 0 ] && ok "CmdBackend: expand + run echo template" || fail "CmdBackend unit"
+
+# CLI: --backend cmd without template fails cleanly
+repo_cmd="$(newrepo)"
+seed_workspace "$repo_cmd"
+cd "$repo_cmd"
+"${KURU[@]}" new-slice "Cmd" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+if "${BOARD[@]}" run --repo "$repo_cmd" --plugin-dir "$ROOT" -y --backend cmd --no-commit \
+    >/tmp/br-cmd-miss.$$ 2>&1; then
+  fail "cmd without --backend-cmd should fail"
+else
+  grep -qi 'backend-cmd\|template' /tmp/br-cmd-miss.$$ \
+    && ok "CLI --backend cmd missing template: clear error" \
+    || { fail "cmd missing template: unclear error"; tail -10 /tmp/br-cmd-miss.$$; }
+fi
+
+echo "== Phase 4: --check-contract default off; flag exercises mock =="
+# Default happy path must still skip check (no check stage in events)
+repo_ch="$(newrepo)"
+seed_workspace "$repo_ch"
+cd "$repo_ch"
+"${KURU[@]}" new-slice "NoCheck" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+"${BOARD[@]}" run --repo "$repo_ch" --plugin-dir "$ROOT" -y --backend mock --no-commit \
+  >/tmp/br-nocheck.$$ 2>&1 \
+  || { fail "default mock run failed"; tail -20 /tmp/br-nocheck.$$; }
+ev="$(ls -d .kuru/runs/r_* | tail -1)/events.ndjson"
+if grep -q '"stage": "check"' "$ev"; then
+  fail "default run should skip check stage"
+else
+  ok "default run skips contract check"
+fi
+
+# With --check-contract + check_flag_times=1: repair then ship
+repo_ch2="$(newrepo)"
+seed_workspace "$repo_ch2"
+cd "$repo_ch2"
+echo '{"default":{"check_flag_times":1}}' > sc-check.json
+"${KURU[@]}" new-slice "CheckFix" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+"${BOARD[@]}" run --repo "$repo_ch2" --plugin-dir "$ROOT" -y --backend mock \
+  --mock-scenario sc-check.json --check-contract --no-commit >/tmp/br-check.$$ 2>&1 \
+  || { fail "check-contract repair path failed"; tail -30 /tmp/br-check.$$; }
+st="$("${KURU[@]}" show SL-0001 --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+[ "$st" = "done" ] && ok "check-contract flag + repair ships to done" || fail "status=$st after check-contract"
+ev2="$(ls -d .kuru/runs/r_* | tail -1)/events.ndjson"
+grep -q '"stage": "check"' "$ev2" && grep -q '"stage": "repair"' "$ev2" \
+  && ok "events include check + repair stages" || fail "missing check/repair events"
+
+# Permanently flagged → stuck
+repo_ch3="$(newrepo)"
+seed_workspace "$repo_ch3"
+cd "$repo_ch3"
+echo '{"default":{"check":"flagged"}}' > sc-bad.json
+"${KURU[@]}" new-slice "BadContract" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+"${BOARD[@]}" run --repo "$repo_ch3" --plugin-dir "$ROOT" -y --backend mock \
+  --mock-scenario sc-bad.json --check-contract --no-commit >/tmp/br-checkbad.$$ 2>&1 || true
+sum="$(ls .kuru/runs/*/summary.json | head -1)"
+python3 -c "
+import json
+s=json.load(open('$sum'))
+r=s['results']['SL-0001']
+assert r['outcome']=='stuck', r
+assert 'flagged' in r['reason'] or 'contract' in r['reason'], r
+" && ok "check permanently flagged → stuck" || fail "flagged contract outcome wrong"
+
+echo "== Phase 4: board status + logs =="
+repo_st="$(newrepo)"
+seed_workspace "$repo_st"
+cd "$repo_st"
+"${KURU[@]}" new-slice "Status" >/dev/null
+"${KURU[@]}" set-status SL-0001 ready >/dev/null
+"${BOARD[@]}" run --repo "$repo_st" --plugin-dir "$ROOT" -y --backend mock --no-commit \
+  >/tmp/br-st.$$ 2>&1 || true
+out="$("${BOARD[@]}" status --repo "$repo_st" 2>/dev/null)"
+echo "$out" | grep -q 'shipped=1\|shipped' \
+  && ok "board status lists run summary" || { fail "board status empty"; echo "$out"; }
+logpath="$("${BOARD[@]}" logs --repo "$repo_st" --slice SL-0001 --stage build 2>/dev/null)"
+[ -f "$logpath" ] && ok "board logs prints build.log path" || fail "board logs path missing: $logpath"
+
 echo
 echo "board selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

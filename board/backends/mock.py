@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from board.backends.base import StageProcessResult
 from board.ledger import Ledger, KuruError
+
+if TYPE_CHECKING:
+    from board.cancel import RunControl
 
 # Per-slice scenario keys (optional; fall back to "default" then built-in ok)
 #   build: "ok" | "blocked"
@@ -18,7 +21,9 @@ from board.ledger import Ledger, KuruError
 #   review: "ok" | "rejected" | "no_verdict"
 #   review_fail_times: int
 #   ship: "ok" | "refuse"  — refuse leaves status unchanged
-#   check: "ok" | "flagged"  — Phase 1 treats flagged as ok-with-note (no repair yet)
+#   check: "ok" | "flagged"  — always flagged (repair cannot clear unless flag_times)
+#   check_flag_times: int — flag first N checks, then ok (for repair path tests)
+#   sleep_ms: int — sleep at start of each stage (cancel tests)
 
 
 ROLE = {
@@ -34,9 +39,16 @@ ROLE = {
 class MockBackend:
     name = "mock"
 
-    def __init__(self, ledger: Ledger, scenarios: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        ledger: Ledger,
+        scenarios: dict[str, Any] | None = None,
+        *,
+        control: "RunControl | None" = None,
+    ):
         self.ledger = ledger
         self.scenarios = scenarios or {}
+        self.control = control
         self._counts: dict[str, dict[str, int]] = {}  # sid -> {build, verify, review}
 
     def _sc(self, slice_id: str) -> dict[str, Any]:
@@ -49,6 +61,18 @@ class MockBackend:
         bag = self._counts.setdefault(sid, {})
         bag[key] = bag.get(key, 0) + 1
         return bag[key]
+
+    def _sleep_if_needed(self, sid: str, sc: dict[str, Any]) -> bool:
+        """Optional sleep for cancel tests. Returns True if cancelled during sleep."""
+        ms = int(sc.get("sleep_ms") or 0)
+        if ms <= 0:
+            return bool(self.control and self.control.is_cancelled(sid))
+        deadline = time.monotonic() + (ms / 1000.0)
+        while time.monotonic() < deadline:
+            if self.control and self.control.is_cancelled(sid):
+                return True
+            time.sleep(0.05)
+        return bool(self.control and self.control.is_cancelled(sid))
 
     def run_stage(
         self,
@@ -67,7 +91,10 @@ class MockBackend:
         note = ""
         code = 0
         try:
-            if stage == "check":
+            if self._sleep_if_needed(sid, sc):
+                note = "cancelled"
+                code = 130
+            elif stage == "check":
                 note = self._do_check(sid, sc)
             elif stage == "build":
                 note = self._do_build(sid, sc)
@@ -78,11 +105,14 @@ class MockBackend:
             elif stage == "ship":
                 note = self._do_ship(sid, sc)
             elif stage == "repair":
-                # Phase 1: no real repair — mark ready if draft
                 note = self._do_repair(sid, sc)
             else:
                 note = f"unknown stage {stage}"
                 code = 2
+            # Re-check cancel after work (e.g. cancel mid-stage on non-sleep path)
+            if code == 0 and self.control and self.control.is_cancelled(sid):
+                note = "cancelled"
+                code = 130
         except KuruError as e:
             note = str(e)
             code = e.returncode or 1
@@ -113,8 +143,10 @@ class MockBackend:
         self.ledger.run(*args)
 
     def _do_check(self, sid: str, sc: dict[str, Any]) -> str:
-        v = sc.get("check", "ok")
-        if v == "flagged":
+        n = self._count(sid, "check")
+        flag_times = int(sc.get("check_flag_times") or 0)
+        mode = sc.get("check", "ok")
+        if mode == "flagged" or (flag_times and n <= flag_times):
             return "flagged"
         return "ok"
 
@@ -122,6 +154,7 @@ class MockBackend:
         st = self._status(sid)
         if st == "draft":
             self._set(sid, "ready", by="planner", note="mock repair")
+        # Ensure next status is buildable even if already ready
         return "repaired"
 
     def _do_build(self, sid: str, sc: dict[str, Any]) -> str:

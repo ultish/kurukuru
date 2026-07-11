@@ -1,16 +1,38 @@
 ---
 name: loop-workflow
-description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→review→ship using a Claude Code dynamic workflow. Explains how to author, present, and launch the workflow script, the PER-SLICE pipelines keyed by gate target (same target serialized, different targets parallel — the no-worktrees lesson), how slices route on the state machine (including the review stage when the workspace has review on, and retry/back-to-build edges), the deferred single commit, and the guardrails.
+description: Use when running /kuru:loop-workflow, or when asked to drive ready Kurukuru slices through build→verify→review→ship. Prefer the portable board runner (python3 -m board); Claude Code dynamic Workflow is an optional Claude-only path. Covers target-mutex pipelines, engine-aligned routing, deferred commit, and guardrails.
 ---
 
-# Driving the board with a dynamic workflow
+# Driving the board (multi-slice pipelines)
 
 `/kuru:loop-workflow` clears the board the same way `/kuru:loop` does — the mechanical
 `build → verify → review → ship` cycle (review runs when the workspace has it on — the `kuru
 init` default; a review rejection rebuilds like a verify rejection) — but it drives each slice
-as its **own pipeline** and runs
-slices **on different gate targets in parallel** (same-target slices serialize), as a **Claude
-Code dynamic workflow** rather than by orchestrating subagents inside this conversation.
+as its **own pipeline** and runs slices **on different gate targets in parallel** (same-target
+slices serialize).
+
+## Prefer the board runner
+
+**Default recommendation:** shell out to the portable Python control plane when available:
+
+```bash
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude --ui board -y
+# also: --backend grok | mock | cmd --backend-cmd '…'
+# plan only: python3 -m board plan
+# history:  python3 -m board status
+```
+
+Policy lives in `board/` + `scripts/kuru.py` (engine). The hierarchical TUI (`--ui board`)
+supports pause (`p`) and cancel selected slice (`c`). See `impl/BOARD_RUNNER_PLAN.md`.
+
+The **Claude Code dynamic Workflow** path below remains valid as a **Claude-only / legacy**
+option (JS `Workflow` tool + `agent()`). Prefer board when both are available — board is
+agent-agnostic and engine-aligned on routing edge cases.
+
+## Claude-only path: dynamic workflow
+
+When using Claude Code’s `Workflow` tool instead of board, the same policy is implemented as a
+JS orchestration script rather than by orchestrating subagents inside this conversation.
 
 ## Why a dynamic workflow (and not in-session orchestration)
 
@@ -121,17 +143,26 @@ nothing new can start.
 rejections.** `maxTries` (default 2) is how many build→verify(→review) cycles a slice gets in this
 run. A try is counted at the **build** that starts it, so **any** failed cycle consumes one and
 loops the slice back to a fresh build: a verify that `rejected`s, a **review** that `rejected`s
-(when review is on), a build that goes `blocked` (the builder gave up / gates stayed red), a verify
-that recorded **no verdict** (`verifying`), or an agent that threw. The build stage normalizes a
-retried slice first (`blocked` → `in_progress`, `verifying` → `rejected`) so the next build can run.
-The slice is `capped` only once the try budget is spent — so a slice that keeps failing on the
-**build** side now gets its full `maxTries` attempts (each a fresh-context builder) instead of
-stopping at the first block. State routing: `ready` / `in_progress` / `rejected` / `blocked` /
-`verifying` → build (start/retry a cycle), `built` → verify, `verified` → **review** (when review is
-on; else ship), `reviewed` → ship. **Review is a stage of the same try** — a review rejection
-(`verified` → `rejected`) rebuilds like a verify rejection and consumes the next try; it is NOT a
-separate budget. When review is **off**, the cycle is just `build → verify` and a verified slice
-ships directly.
+(when review is on), a build that goes `blocked` (the builder gave up / gates stayed red), or an
+agent that threw. Mid-run `blocked` is normalized (`blocked` → `in_progress`) then rebuilt.
+
+**Engine-aligned routing (board + `kuru.py` win over older script notes):**
+
+| ledger status | next action |
+|---------------|-------------|
+| `ready` / `in_progress` / `rejected` | **build** |
+| `built` / **`verifying`** | **verify** (re-verify — do **not** rebuild; a stuck no-verdict verify is capped separately) |
+| `verified` | **review** if policy on, else **ship** |
+| `reviewed` | **ship** |
+
+`STATUS_ACTION["verifying"] = "verify"` in `scripts/kuru.py`. **Do not** normalize
+`verifying → rejected` and rebuild. Cap repeated no-verdict verifies (board: `max_no_verdict`).
+The reference JS script below historically treated `verifying` as NEEDS_BUILD — that diverges from
+the engine; **prefer board**, or when authoring Workflow JS follow the table above.
+
+**Review is a stage of the same try** — a review rejection (`verified` → `rejected`) rebuilds like
+a verify rejection and consumes the next try; it is NOT a separate budget. When review is **off**,
+the cycle is just `build → verify` and a verified slice ships directly.
 
 **Pre-build contract check (advisory).** Before a slice's **first build this run** (status
 `ready`/`in_progress`, not `rejected`), its pipeline runs the **contract critic**

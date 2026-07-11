@@ -16,9 +16,14 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from board.backends.base import StageProcessResult
+from board.cancel import wait_or_cancel
 from board.prompts import stage_prompt_grok, stage_role
+
+if TYPE_CHECKING:
+    from board.cancel import RunControl
 
 
 def find_grok(explicit: str | None = None) -> str | None:
@@ -64,6 +69,7 @@ class GrokBackend:
         max_turns: int | None = None,
         kuru_py: Path | None = None,
         extra_args: list[str] | None = None,
+        control: "RunControl | None" = None,
     ):
         self.plugin_dir = Path(plugin_dir).resolve()
         self.grok_bin = grok_bin  # may still be None; fail at run_stage
@@ -79,6 +85,7 @@ class GrokBackend:
             else self.plugin_dir / "scripts" / "kuru.py"
         )
         self.extra_args = list(extra_args or [])
+        self.control = control
         self.env = {
             **os.environ,
             "CLAUDE_PLUGIN_ROOT": str(self.plugin_dir),
@@ -129,6 +136,21 @@ class GrokBackend:
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if self.control and self.control.is_cancelled(sid):
+            elapsed = int((time.monotonic() - t0) * 1000)
+            log_path.write_text(
+                f"grok backend: cancelled before spawn\n"
+                f"stage={stage} slice={sid}\n",
+                encoding="utf-8",
+            )
+            return StageProcessResult(
+                exit_code=130,
+                elapsed_ms=elapsed,
+                pid=None,
+                note="cancelled",
+                role=role,
+            )
+
         try:
             cmd = self.build_cmd(effective, cwd=Path(cwd))
         except GrokNotFoundError as e:
@@ -153,13 +175,14 @@ class GrokBackend:
             f"---\n"
         )
         pid: int | None = None
+        note = ""
+        exit_code = 1
+        cancel_check = self.control.cancel_check(sid) if self.control else None
+
         with log_path.open("w", encoding="utf-8") as logf:
             logf.write(header)
             logf.flush()
             try:
-                # Popen so hierarchical TUI can eventually surface a real pid
-                # (pipeline currently emits spawn with pid=None pre-stage; we
-                # still return pid on exit for backend.exited / logs).
                 proc = subprocess.Popen(
                     cmd,
                     cwd=str(cwd),
@@ -167,21 +190,27 @@ class GrokBackend:
                     stdout=logf,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    start_new_session=True,
                 )
                 pid = proc.pid
+                if self.control:
+                    self.control.bind_process(sid, proc)
                 try:
-                    exit_code = proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
-                    exit_code = 124
-                    note = f"grok timed out after {timeout}s"
-                    logf.write(f"\n--- timeout: {note} ---\n")
-                else:
-                    note = f"grok exited {exit_code}"
+                    exit_code, wait_note = wait_or_cancel(
+                        proc,
+                        cancel_check=cancel_check,
+                        timeout=timeout,
+                    )
+                    if wait_note == "cancelled":
+                        note = "cancelled"
+                    elif wait_note.startswith("timed out"):
+                        note = f"grok {wait_note}"
+                        logf.write(f"\n--- timeout: {note} ---\n")
+                    else:
+                        note = f"grok exited {exit_code}"
+                finally:
+                    if self.control:
+                        self.control.unbind_process(sid, proc)
             except OSError as e:
                 exit_code = 127
                 note = f"failed to spawn grok: {e}"

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Board runner (Phase 0+1+2+3+3b):** top-level `board/` package — agent-agnostic multi-slice
+- **Board runner (Phase 0–4):** top-level `board/` package — agent-agnostic multi-slice
   driver. See `impl/BOARD_RUNNER_PLAN.md`.
   - **Phase 0:** `python3 -m board plan` — target-mutex plan (`null` → `default`),
     `run.planned` NDJSON under `.kuru/runs/<run_id>/`.
@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Phase 3:** `python3 -m board run --ui board` — hierarchical ANSI TUI (stdlib):
     target lanes → slices → stages → agents; j/k select, expand/collapse, Enter
     drill-in with log tail, `w` waiting filter, `l` pager, `p` pause new starts,
-    `?` help, `q` quit. Non-TTY falls back to plain. Pure view-model
-    (`board/ui/viewmodel.py`) unit-tested from event sequences.
+    `c` cancel selected slice, `?` help, `q` quit. Non-TTY falls back to plain. Pure
+    view-model (`board/ui/viewmodel.py`) unit-tested from event sequences.
   - **Phase 3b:** `python3 -m board run --backend grok` — live Grok Build stages
     (`grok -p` / `--single`, `--cwd`, default `--always-approve` for autonomous board
     runs — Grok has no `--yolo`). Self-contained stage prompts load skills from disk
@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (no Claude slash-command discovery). `Popen` captures pid for board agent rows.
     Flags: `--grok-bin`, `--no-always-approve`, `--grok-permission-mode`, `--max-turns`,
     shared `--model`. Live smoke needs a logged-in `grok` CLI; CI uses mock + unit tests.
+  - **Phase 4:** cancel selected slice (`c` / `RunControl` process-group kill);
+    **`cmd` backend** (`--backend cmd --backend-cmd '… {prompt_file} {cwd} …'`);
+    optional **`--check-contract`** (default off; mock repair path when flagged);
+    `board status` / `board logs`; best-effort `progress.md` line after run.
   - **`board/prompts.py`** — Claude slash prompts + Grok skill-on-disk prompts
     (ship always `--no-commit` / `set-status done --no-commit`).
 - **`kuru commit`:** deferred batch commit after `set-status done --no-commit`
@@ -40,16 +44,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.kuru/.gitignore` seeds `runs/`** so board run logs are never swept into commits;
   `kuru doctor` warns if an older workspace is missing that line.
 - **`scripts/board-selftest.sh`** — plan, mock run, serial/parallel, verifying policy,
-  cap, deferred-commit isolation, Claude + Grok backend unit checks, Phase 3
-  view-model + board non-TTY fallback (no live API).
+  cap, deferred-commit isolation, Claude + Grok + cmd backend unit checks, cancel,
+  check-contract, Phase 3 view-model + board non-TTY fallback (no live API).
 
 ### Changed
 - **`kuru next --all --json` waiting entries** now include `target` (and `depends_on` /
   `status`) so parallel drivers can mutex-key dep-blocked slices without extra shows.
+- **`/kuru:loop-workflow` + `loop-workflow` skill** prefer `python3 -m board run` as the
+  portable multi-slice driver; Claude Code dynamic Workflow remains documented as an
+  optional Claude-only path. Skill routing prose notes engine-aligned
+  `verifying` → re-verify (not rebuild).
 
 ### Notes
 - **`runner.py` remains** the single-threaded Claude driver. Prefer
-  `python3 -m board run --backend claude` (or `--backend grok`) for multi-target /
+  `python3 -m board run --backend claude` (or `--backend grok` / `cmd`) for multi-target /
   multi-slice board runs.
 
 ## [2.2.0] - 2026-07-10

@@ -1,16 +1,40 @@
 ---
-description: Drive ready slices through PER-SLICE build→verify→review→ship pipelines by authoring and launching a Claude Code dynamic workflow — same-target slices serialize (one shared tree), different-target slices run in parallel, all dependency-ordered. Fresh context per build/verify/review/ship; review runs when the workspace has it on. Optionally scope to a single slice or a comma-separated set.
+description: Drive ready slices through PER-SLICE build→verify→review→ship pipelines. Prefer the portable board runner (python3 -m board); Claude Code dynamic Workflow remains an optional Claude-only path. Same-target serial, different-target parallel. Optionally scope to a single slice or a comma-separated set.
 argument-hint: "[slice-id | id1,id2,... ] [max-tries, default 2]"
 ---
 
-Use the `loop-workflow` skill for context — it holds the full design and the reference script.
+Use the `loop-workflow` skill for context — it holds the full design, board invoke notes, and the
+optional Claude Workflow reference script.
+
+## Preferred driver: board runner (portable)
+
+When the kurukuru plugin root is available on `PYTHONPATH` (or you are in the plugin checkout),
+**prefer the Python board orchestrator** over authoring a JS workflow:
+
+```bash
+# From the target workspace (with .kuru/), plugin on PYTHONPATH:
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend claude --ui board -y
+# Grok Build:
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend grok --ui board -y
+# Generic shell agent (Pi etc.):
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend cmd \
+  --backend-cmd 'my-agent -p {prompt_file} --dir {cwd}' -y
+# Headless / CI:
+PYTHONPATH=/path/to/kurukuru python3 -m board run --backend mock --ui plain -y
+```
+
+The board runner implements the same policy as this command (target mutex, try budget,
+engine-aligned `verifying` → re-verify, deferred commit) without Claude Code’s JS `Workflow`
+tool. Use `/kuru:loop-workflow`’s Workflow path only when you specifically want the Claude-only
+dynamic-workflow UI, or when the board package is unavailable.
 
 This is the **per-slice-pipeline** autonomous driver. It runs the mechanical `build → verify →
-review → ship` part of the pipeline over the actionable slices (dependencies satisfied), but unlike
-`/kuru:loop` it does so as a **Claude Code dynamic workflow**: you author a JavaScript
-orchestration script, the user approves it, and the workflow runtime runs each stage as a fresh,
-isolated `agent()`. That per-step clean context is the point — it's why this can clear a large
-board without the orchestrator's context degrading, and why it supersedes `runner.py`.
+review → ship` part of the pipeline over the actionable slices (dependencies satisfied). The
+**preferred** implementation is `python3 -m board` (above). The **legacy / Claude-only** path
+authors a JavaScript orchestration script for Claude Code’s `Workflow` tool: each stage is a
+fresh isolated `agent()`. That per-step clean context is the point of both drivers — it's why
+this can clear a large board without the orchestrator's context degrading, and why it supersedes
+`runner.py`.
 
 The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are still done by a human
 first; this only loops the deterministic part. **Code review runs when this workspace has it on**

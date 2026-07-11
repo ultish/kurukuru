@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from board.backends.base import AgentBackend
+from board.cancel import RunControl
 from board.events import EventWriter
 from board.ledger import Ledger
 from board.models import BoardPlan, mutex_key
@@ -61,6 +62,8 @@ class Scheduler:
         max_tries: int = 2,
         max_workers: int | None = None,
         pause_event: threading.Event | None = None,
+        control: RunControl | None = None,
+        skip_check: bool = True,
     ):
         self.ledger = ledger
         self.backend = backend
@@ -72,6 +75,8 @@ class Scheduler:
         self._lock = threading.Lock()
         # When set, do not start *new* pipelines (in-flight continue). Board `p`.
         self.pause_event = pause_event
+        self.control = control
+        self.skip_check = skip_check
 
     def run(self, plan: BoardPlan) -> RunResult:
         out = RunResult(
@@ -126,6 +131,8 @@ class Scheduler:
                 run_dir=self.run_dir,
                 review=self.review,
                 max_tries=self.max_tries,
+                skip_check=self.skip_check,
+                control=self.control,
             )
             return pipe.drive(rt)
 
@@ -137,6 +144,23 @@ class Scheduler:
                     seen_targets: set[str] = set()
                     for sid, rt in roster.items():
                         if not is_live(sid) or sid in running:
+                            continue
+                        # Cancel before start (TUI `c` on a waiting slice)
+                        if self.control and self.control.is_cancelled(sid):
+                            stuck.add(sid)
+                            out.stuck.append({"id": sid, "reason": "cancelled"})
+                            out.results[sid] = PipelineResult(
+                                slice_id=sid,
+                                outcome="stuck",
+                                final_status=rt.status,
+                                reason="cancelled",
+                            )
+                            self.events.emit(
+                                "slice.finished",
+                                id=sid,
+                                outcome="stuck",
+                                reason="cancelled",
+                            )
                             continue
                         if dep_dead(rt):
                             stuck.add(sid)

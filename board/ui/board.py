@@ -45,7 +45,7 @@ HELP_TEXT = """\
   l            open selected stage log in $PAGER (or print path)
   w            toggle waiting / blocker filter
   p            pause starting new pipelines (in-flight continue)
-  c            cancel stage (not yet — Phase 4)
+  c            cancel selected slice (stop pipeline + kill stage process)
   q            quit (confirm if run still active)
   ?            this help
 """
@@ -61,6 +61,7 @@ class BoardUI:
         stream: TextIO | None = None,
         input_stream: TextIO | None = None,
         pause_event: threading.Event | None = None,
+        on_cancel: Callable[[str], str] | None = None,
         tick_s: float = 0.15,
         log_tail_lines: int = 14,
     ):
@@ -68,6 +69,7 @@ class BoardUI:
         self.stream = stream or sys.stdout
         self.input_stream = input_stream or sys.stdin
         self.pause_event = pause_event  # set() => pause new starts
+        self.on_cancel = on_cancel  # request cancel for slice_id → status msg
         self.tick_s = tick_s
         self.log_tail_lines = log_tail_lines
 
@@ -197,13 +199,13 @@ class BoardUI:
         elif key == "p":
             self._toggle_pause()
         elif key == "c":
-            self._status_msg = "cancel not yet supported (Phase 4)"
+            self._request_cancel()
 
     def _handle_drill_key(self, key: str) -> None:
         if key in ("l", "L"):
             self._open_log()
         elif key == "c":
-            self._status_msg = "cancel not yet supported (Phase 4)"
+            self._request_cancel()
         elif key == "p":
             self._toggle_pause()
         elif key in ("j", "\x1b[B"):
@@ -227,6 +229,27 @@ class BoardUI:
                 if self._paused
                 else "pause cleared"
             )
+
+    def _selected_slice_id(self) -> str | None:
+        if self._mode == "drill" and self._drill_slice:
+            return self._drill_slice
+        row = self._selected_row()
+        if row and row.slice_id:
+            return row.slice_id
+        return None
+
+    def _request_cancel(self) -> None:
+        sid = self._selected_slice_id()
+        if not sid:
+            self._status_msg = "cancel: select a slice first"
+            return
+        if self.on_cancel is None:
+            self._status_msg = "cancel not available for this run"
+            return
+        try:
+            self._status_msg = self.on_cancel(sid)
+        except Exception as e:
+            self._status_msg = f"cancel failed: {e}"
 
     def _selected_row(self) -> TreeRow | None:
         if not self._rows:
@@ -372,7 +395,7 @@ class BoardUI:
 
     def _footer(self, state: BoardState, detail: str) -> str:
         c = state.counts()
-        keys = "j/k select · enter drill · l log · w filter · p pause · ? help · q quit"
+        keys = "j/k select · enter drill · l log · w filter · p pause · c cancel · ? help · q quit"
         counts = (
             f"{c['running']} running · {c['waiting']} waiting · "
             f"{c['shipped']} shipped · {c['capped']} capped · {c['stuck']} stuck"
@@ -580,6 +603,7 @@ def make_run_ui(
     *,
     run_dir: Path | None = None,
     pause_event: threading.Event | None = None,
+    on_cancel: Callable[[str], str] | None = None,
 ):
     """Factory used by CLI. Falls back to PlainUI when board is not viable."""
     from board.ui.plain import PlainUI
@@ -588,7 +612,11 @@ def make_run_ui(
         return None
     if ui_name == "board":
         if board_available():
-            return BoardUI(run_dir=run_dir, pause_event=pause_event)
+            return BoardUI(
+                run_dir=run_dir,
+                pause_event=pause_event,
+                on_cancel=on_cancel,
+            )
         # non-TTY → plain with a note on stderr
         print(
             "note: --ui board requires a TTY; falling back to plain",

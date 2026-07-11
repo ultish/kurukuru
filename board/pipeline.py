@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from board.backends.base import AgentBackend
 from board.events import EventWriter
 from board.ledger import KuruError, Ledger
 from board.prompts import stage_prompt_for, stage_role
+
+if TYPE_CHECKING:
+    from board.cancel import RunControl
 
 NEEDS_BUILD = frozenset({"ready", "in_progress", "rejected"})
 DEFAULT_MAX_NO_VERDICT = 2
@@ -42,7 +45,8 @@ class SliceRuntime:
     pipeline_iters: int = 0
     build_count: int = 0
     verify_count: int = 0
-    checked: bool = True  # Phase 1: skip contract check by default
+    # When skip_check is False, start unchecked so first clean build runs check.
+    checked: bool = False
 
 
 class SlicePipeline:
@@ -58,6 +62,7 @@ class SlicePipeline:
         max_no_verdict: int = DEFAULT_MAX_NO_VERDICT,
         max_pipeline_iters: int = DEFAULT_MAX_PIPELINE_ITERS,
         skip_check: bool = True,
+        control: "RunControl | None" = None,
     ):
         self.ledger = ledger
         self.backend = backend
@@ -68,12 +73,28 @@ class SlicePipeline:
         self.max_no_verdict = max_no_verdict
         self.max_pipeline_iters = max_pipeline_iters
         self.skip_check = skip_check
+        self.control = control
+
+    def _cancelled(self, rt: SliceRuntime) -> bool:
+        return bool(self.control and self.control.is_cancelled(rt.id))
 
     def drive(self, rt: SliceRuntime) -> PipelineResult:
         sid = rt.id
         self.events.emit("slice.started", id=sid, target=rt.mutex_target)
 
+        try:
+            return self._drive_loop(rt)
+        finally:
+            if self.control:
+                self.control.clear_slice(sid)
+
+    def _drive_loop(self, rt: SliceRuntime) -> PipelineResult:
+        sid = rt.id
+
         while True:
+            if self._cancelled(rt):
+                return self._finish(rt, "stuck", "cancelled")
+
             rt.pipeline_iters += 1
             if rt.pipeline_iters > self.max_pipeline_iters:
                 return self._finish(rt, "stuck", "pipeline iteration cap")
@@ -106,22 +127,42 @@ class SlicePipeline:
 
             if st in NEEDS_BUILD:
                 if not self.skip_check and not rt.checked and st in ("ready", "in_progress"):
-                    # Phase 1 optional path — skip_check True by default
-                    res = self._stage(rt, "check")
-                    if res.note == "flagged":
-                        return self._finish(rt, "stuck", "contract flagged (repair not in Phase 1)")
+                    chk = self._stage(rt, "check")
+                    if self._cancelled(rt) or chk.note == "cancelled":
+                        return self._finish(rt, "stuck", "cancelled")
+                    if chk.note == "flagged":
+                        # Light repair path: planner rewrite + re-check, capped by max_tries.
+                        ok = False
+                        for _ in range(self.max_tries):
+                            self._stage(rt, "repair")
+                            if self._cancelled(rt):
+                                return self._finish(rt, "stuck", "cancelled")
+                            rechk = self._stage(rt, "check")
+                            if self._cancelled(rt) or rechk.note == "cancelled":
+                                return self._finish(rt, "stuck", "cancelled")
+                            if rechk.note != "flagged":
+                                ok = True
+                                break
+                        if not ok:
+                            return self._finish(
+                                rt, "stuck", "contract flagged (repair exhausted)"
+                            )
                     rt.checked = True
 
                 if rt.tries >= self.max_tries:
                     return self._finish(rt, "capped", f"exhausted {self.max_tries} tries")
                 rt.tries += 1
                 rt.build_count += 1
-                self._stage(rt, "build")
+                res = self._stage(rt, "build")
+                if self._cancelled(rt) or res.note == "cancelled":
+                    return self._finish(rt, "stuck", "cancelled")
                 continue
 
             if st in ("built", "verifying"):
                 rt.verify_count += 1
-                self._stage(rt, "verify")
+                res = self._stage(rt, "verify")
+                if self._cancelled(rt) or res.note == "cancelled":
+                    return self._finish(rt, "stuck", "cancelled")
                 try:
                     after = self.ledger.show(sid)["status"]
                 except KuruError as e:
@@ -142,7 +183,9 @@ class SlicePipeline:
 
             if st == "verified":
                 if self.review:
-                    self._stage(rt, "review")
+                    res = self._stage(rt, "review")
+                    if self._cancelled(rt) or res.note == "cancelled":
+                        return self._finish(rt, "stuck", "cancelled")
                     try:
                         after = self.ledger.show(sid)["status"]
                     except KuruError as e:
@@ -152,7 +195,9 @@ class SlicePipeline:
                         return self._finish(rt, "stuck", "review recorded no verdict")
                     # rejected → rebuild; reviewed → ship next iter
                     continue
-                self._stage(rt, "ship")
+                res = self._stage(rt, "ship")
+                if self._cancelled(rt) or res.note == "cancelled":
+                    return self._finish(rt, "stuck", "cancelled")
                 try:
                     after = self.ledger.show(sid)["status"]
                 except KuruError as e:
@@ -162,7 +207,9 @@ class SlicePipeline:
                 return self._finish(rt, "stuck", f"ship refused (left at {after})")
 
             if st == "reviewed":
-                self._stage(rt, "ship")
+                res = self._stage(rt, "ship")
+                if self._cancelled(rt) or res.note == "cancelled":
+                    return self._finish(rt, "stuck", "cancelled")
                 try:
                     after = self.ledger.show(sid)["status"]
                 except KuruError as e:
@@ -175,6 +222,17 @@ class SlicePipeline:
 
     def _stage(self, rt: SliceRuntime, stage: str):
         sid = rt.id
+        if self._cancelled(rt):
+            from board.backends.base import StageProcessResult
+
+            return StageProcessResult(
+                exit_code=130,
+                elapsed_ms=0,
+                pid=None,
+                note="cancelled",
+                role=stage_role(stage),
+            )
+
         log_path = self.run_dir / sid / f"{stage}.log"
         # Claude: slash commands. Grok: skill-on-disk + kuru.py (no slash discovery).
         prompt = stage_prompt_for(

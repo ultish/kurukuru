@@ -1,4 +1,4 @@
-"""board CLI — plan + run (mock / claude / grok backends)."""
+"""board CLI — plan + run + status/logs (mock / claude / grok / cmd backends)."""
 
 from __future__ import annotations
 
@@ -6,17 +6,20 @@ import argparse
 import json
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from board import __version__
 from board.backends.claude import ClaudeBackend, find_claude
+from board.backends.cmd import CmdBackend
 from board.backends.grok import GrokBackend, find_grok
 from board.backends.mock import MockBackend, load_mock_scenarios
+from board.cancel import RunControl
 from board.events import EventWriter, default_run_dir, new_run_id
 from board.ledger import Ledger, resolve_kuru_py
 from board.plan import build_plan, format_plan_text
 from board.preconditions import check_preconditions
-from board.scheduler import Scheduler
+from board.scheduler import RunResult, Scheduler
 from board.ui.board import BoardUI, board_available, make_run_ui
 from board.ui.plain import PlainUI
 
@@ -82,6 +85,34 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0 if pre.ok or args.force else 2
 
 
+def _append_progress(repo: Path, run_id: str, result: RunResult) -> None:
+    """Best-effort one-line update to .kuru/progress.md. Never raises to caller."""
+    path = repo / ".kuru" / "progress.md"
+    try:
+        if not path.is_file():
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        shipped = ", ".join(result.shipped) or "—"
+        stuck_bits = []
+        for s in result.stuck:
+            if isinstance(s, dict):
+                stuck_bits.append(f"{s.get('id', '?')}({s.get('reason', '')})")
+            else:
+                stuck_bits.append(str(s))
+        stuck_s = ", ".join(stuck_bits) or "—"
+        capped_s = ", ".join(result.capped) or "—"
+        line = (
+            f"- {ts} board run `{run_id}`: shipped [{shipped}]; "
+            f"capped [{capped_s}]; stuck [{stuck_s}]\n"
+        )
+        text = path.read_text(encoding="utf-8")
+        if not text.endswith("\n"):
+            text += "\n"
+        path.write_text(text + line, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     repo, kuru_py, ledger = _common_repo_plugin(args)
     scope = _parse_slices(args.slices)
@@ -121,15 +152,19 @@ def cmd_run(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir) if args.run_dir else default_run_dir(repo, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Board UI needs a pause Event shared with the scheduler; plain/json ignore it.
+    # Shared with board UI (`p` pause, `c` cancel) and backends (kill).
     pause_event = threading.Event()
+    control = RunControl()
     ui_name = args.ui
-    if ui_name == "board" and not board_available():
-        # make_run_ui also falls back; note once here for dry-run path
-        pass
-    ui = make_run_ui(ui_name, run_dir=run_dir, pause_event=pause_event)
+    ui = make_run_ui(
+        ui_name,
+        run_dir=run_dir,
+        pause_event=pause_event,
+        on_cancel=control.request_cancel,
+    )
     listeners = [ui.on_event] if ui is not None else []
     use_board = isinstance(ui, BoardUI)
+    skip_check = not bool(getattr(args, "check_contract", False))
 
     with EventWriter(run_dir, run_id, listeners=listeners) as ev:
         ev.write_json(
@@ -142,14 +177,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "scope": scope,
                 "review": plan.review,
                 "command": "run",
-                "ui": ui_name if not use_board and ui_name == "board" else (
-                    "board" if use_board else ui_name
-                ),
+                "check_contract": not skip_check,
+                "ui": "board" if use_board else ui_name,
             },
         )
-        # For interactive board, suppress the pre-run plan dump to stdout (board paints).
-        if not use_board and args.ui != "json":
-            pass  # plan already printed above
         ev.emit("run.planned", **plan.to_event_payload())
         ev.emit("run.started", run_id=run_id, backend=args.backend, review=plan.review)
 
@@ -159,7 +190,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("(dry-run — not starting pipelines)")
             return 0
 
-        backend = _make_backend(args, ledger=ledger, kuru_py=kuru_py, plugin_dir=Path(args.plugin_dir))
+        backend = _make_backend(
+            args,
+            ledger=ledger,
+            kuru_py=kuru_py,
+            plugin_dir=Path(args.plugin_dir),
+            control=control,
+        )
         if backend is None:
             return 2
 
@@ -171,6 +208,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             review=plan.review,
             max_tries=args.max_tries,
             pause_event=pause_event if use_board else None,
+            control=control,
+            skip_check=skip_check,
         )
 
         result_box: dict = {}
@@ -192,10 +231,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                 ev.emit("commit.finished", ok=ok, detail=detail_s)
                 result_box["commit_detail"] = detail_s
                 result_box["commit_ok"] = ok
+            # Best-effort progress.md line (never fails the run)
+            _append_progress(repo, run_id, res)
 
         if use_board:
             # Interactive: scheduler on a worker; main thread owns the TTY.
-            # Suppress the plan dump already printed — clear and hand off to board.
             thr = threading.Thread(target=_run_sched, name="board-scheduler", daemon=True)
             thr.start()
             try:
@@ -238,6 +278,160 @@ def cmd_run(args: argparse.Namespace) -> int:
         return result.exit_code()
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """List recent .kuru/runs/* with summary.json when present."""
+    repo = Path(args.repo).resolve()
+    runs_root = repo / ".kuru" / "runs"
+    if not runs_root.is_dir():
+        print(f"no runs under {runs_root}")
+        return 0
+
+    run_dirs = sorted(
+        [p for p in runs_root.iterdir() if p.is_dir()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    limit = max(1, int(args.limit or 20))
+    run_dirs = run_dirs[:limit]
+
+    if not run_dirs:
+        print(f"no runs under {runs_root}")
+        return 0
+
+    if args.json:
+        rows = []
+        for d in run_dirs:
+            rows.append(_run_status_row(d))
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    print(f"runs under {runs_root} (newest first, limit {limit}):")
+    for d in run_dirs:
+        row = _run_status_row(d)
+        shipped = row.get("shipped") or []
+        capped = row.get("capped") or []
+        stuck = row.get("stuck") or []
+        stuck_n = len(stuck) if isinstance(stuck, list) else 0
+        backend = row.get("backend") or "?"
+        print(
+            f"  {row['run_id']:<28} backend={backend:<7} "
+            f"shipped={len(shipped)} capped={len(capped)} stuck={stuck_n}  "
+            f"{row.get('path', '')}"
+        )
+        if args.verbose and (shipped or capped or stuck):
+            if shipped:
+                print(f"    shipped: {', '.join(shipped)}")
+            if capped:
+                print(f"    capped:  {', '.join(capped)}")
+            if stuck:
+                bits = []
+                for s in stuck:
+                    if isinstance(s, dict):
+                        bits.append(f"{s.get('id', '?')}:{s.get('reason', '')}")
+                    else:
+                        bits.append(str(s))
+                print(f"    stuck:   {', '.join(bits)}")
+    return 0
+
+
+def _run_status_row(run_dir: Path) -> dict:
+    rid = run_dir.name
+    row: dict = {
+        "run_id": rid,
+        "path": str(run_dir),
+        "shipped": [],
+        "capped": [],
+        "stuck": [],
+        "backend": None,
+    }
+    cfg_path = run_dir / "config.json"
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            row["backend"] = cfg.get("backend")
+            row["config"] = cfg
+        except (OSError, json.JSONDecodeError):
+            pass
+    sum_path = run_dir / "summary.json"
+    if sum_path.is_file():
+        try:
+            s = json.loads(sum_path.read_text(encoding="utf-8"))
+            row["shipped"] = s.get("shipped") or []
+            row["capped"] = s.get("capped") or []
+            row["stuck"] = s.get("stuck") or []
+            row["summary"] = s
+        except (OSError, json.JSONDecodeError):
+            pass
+    return row
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    """Print path (or tail) of a stage log under a run dir."""
+    repo = Path(args.repo).resolve()
+    run_id = args.run_id
+    if not run_id:
+        # newest run
+        runs_root = repo / ".kuru" / "runs"
+        if not runs_root.is_dir():
+            print("error: no runs found", file=sys.stderr)
+            return 2
+        dirs = sorted(
+            [p for p in runs_root.iterdir() if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not dirs:
+            print("error: no runs found", file=sys.stderr)
+            return 2
+        run_dir = dirs[0]
+        run_id = run_dir.name
+    else:
+        run_dir = repo / ".kuru" / "runs" / run_id
+        if not run_dir.is_dir():
+            # allow absolute / relative override
+            alt = Path(run_id)
+            if alt.is_dir():
+                run_dir = alt
+            else:
+                print(f"error: run dir not found: {run_dir}", file=sys.stderr)
+                return 2
+
+    sid = (args.slice or "").upper() or None
+    stage = args.stage or None
+
+    if sid and stage:
+        path = run_dir / sid / f"{stage}.log"
+        if not path.is_file():
+            print(f"error: log not found: {path}", file=sys.stderr)
+            return 2
+        if args.tail and args.tail > 0:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                for ln in lines[-args.tail :]:
+                    print(ln)
+            except OSError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+        else:
+            print(path)
+        return 0
+
+    # List available logs
+    print(f"run: {run_dir}")
+    found = False
+    for d in sorted(run_dir.iterdir()) if run_dir.is_dir() else []:
+        if not d.is_dir() or not d.name.startswith("SL-"):
+            continue
+        if sid and d.name != sid:
+            continue
+        for log in sorted(d.glob("*.log")):
+            found = True
+            print(f"  {d.name}/{log.name}  ({log.stat().st_size} bytes)")
+    if not found:
+        print("  (no stage logs)")
+    return 0
+
+
 def cmd_version(_: argparse.Namespace) -> int:
     print(f"board {__version__}")
     return 0
@@ -249,13 +443,14 @@ def _make_backend(
     ledger: Ledger,
     kuru_py: Path,
     plugin_dir: Path,
+    control: RunControl | None = None,
 ):
     """Construct the stage backend. Prints errors and returns None on failure."""
     if args.backend == "mock":
         scenarios = load_mock_scenarios(
             Path(args.mock_scenario) if args.mock_scenario else None
         )
-        return MockBackend(ledger, scenarios)
+        return MockBackend(ledger, scenarios, control=control)
 
     if args.backend == "claude":
         claude_bin = find_claude(getattr(args, "claude_bin", None))
@@ -274,6 +469,7 @@ def _make_backend(
             settings=getattr(args, "settings", None),
             model=getattr(args, "model", None),
             kuru_py=kuru_py,
+            control=control,
         )
 
     if args.backend == "grok":
@@ -293,16 +489,35 @@ def _make_backend(
             plugin_dir=plugin_dir.resolve(),
             grok_bin=grok_bin,
             always_approve=always,
-            permission_mode=getattr(args, "grok_permission_mode", None)
-            or None,
+            permission_mode=getattr(args, "grok_permission_mode", None) or None,
             model=getattr(args, "model", None),
             max_turns=getattr(args, "max_turns", None),
             kuru_py=kuru_py,
+            control=control,
         )
 
+    if args.backend == "cmd":
+        template = getattr(args, "backend_cmd", None) or ""
+        if not template.strip():
+            print(
+                "error: --backend cmd requires --backend-cmd "
+                "'… {prompt_file} … {cwd} …' template",
+                file=sys.stderr,
+            )
+            return None
+        try:
+            return CmdBackend(
+                template,
+                kuru_py=kuru_py,
+                control=control,
+            )
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return None
+
     print(
-        f"error: backend {args.backend!r} not implemented yet "
-        f"(supported: mock, claude, grok)",
+        f"error: backend {args.backend!r} not implemented "
+        f"(supported: mock, claude, grok, cmd)",
         file=sys.stderr,
     )
     return None
@@ -362,20 +577,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser(
         "run",
-        help="drive ready slices (--backend mock|claude|grok; default mock)",
+        help="drive ready slices (--backend mock|claude|grok|cmd; default mock)",
     )
     _add_repo_flags(run_p, here)
     run_p.add_argument(
         "--backend",
         default="mock",
         choices=["mock", "claude", "grok", "cmd"],
-        help="stage worker (mock for tests; claude/grok for live; cmd later)",
+        help="stage worker (mock for tests; claude/grok/cmd for live agents)",
+    )
+    run_p.add_argument(
+        "--backend-cmd",
+        default=None,
+        metavar="TEMPLATE",
+        help=(
+            "cmd backend: shell template with {prompt_file} {prompt} {cwd} "
+            "{slice} {stage} {kuru_py}"
+        ),
     )
     run_p.add_argument(
         "--mock-scenario",
         default=None,
         metavar="PATH",
         help="JSON scenario file for mock backend",
+    )
+    run_p.add_argument(
+        "--check-contract",
+        action="store_true",
+        help=(
+            "run advisory contract check before first clean build "
+            "(default: skip; mock scenarios can exercise repair)"
+        ),
     )
     # Claude backend flags (mirrors runner.py)
     run_p.add_argument(
@@ -453,6 +685,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument("--commit-message", "-m", default=None, help="deferred commit message")
     run_p.set_defaults(func=cmd_run)
+
+    status_p = sub.add_parser(
+        "status",
+        help="list recent .kuru/runs/* with summary (shipped/capped/stuck)",
+    )
+    status_p.add_argument("--repo", default=".", help="target repo (default: cwd)")
+    status_p.add_argument(
+        "--limit", type=int, default=20, help="max runs to show (default 20)"
+    )
+    status_p.add_argument("--json", action="store_true", help="machine-readable")
+    status_p.add_argument(
+        "-v", "--verbose", action="store_true", help="list slice ids per outcome"
+    )
+    status_p.set_defaults(func=cmd_status)
+
+    logs_p = sub.add_parser(
+        "logs",
+        help="print stage log path (or --tail N) under a run",
+    )
+    logs_p.add_argument("--repo", default=".", help="target repo (default: cwd)")
+    logs_p.add_argument(
+        "--run-id",
+        default=None,
+        help="run id under .kuru/runs/ (default: newest)",
+    )
+    logs_p.add_argument("--slice", default=None, metavar="ID", help="slice id e.g. SL-0001")
+    logs_p.add_argument(
+        "--stage",
+        default=None,
+        help="stage name (build|verify|review|ship|check|…)",
+    )
+    logs_p.add_argument(
+        "--tail",
+        type=int,
+        default=0,
+        metavar="N",
+        help="print last N lines instead of just the path",
+    )
+    logs_p.set_defaults(func=cmd_logs)
 
     return p
 

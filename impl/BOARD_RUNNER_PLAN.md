@@ -1,6 +1,6 @@
 # Board Runner Plan — agent-agnostic multi-slice orchestration + TUI
 
-**Status:** Phase 0–3b implemented (plan + mock + Claude + hierarchical board TUI + Grok); Phase 4 next  
+**Status:** Phase 0–4 implemented (plan + mock + Claude + hierarchical board TUI + Grok + cancel/cmd/check/status)
 **Created:** 2026-07-11  
 **Goal:** Port the *policy* of `/kuru:loop-workflow` into a portable Python control
 plane with pluggable agent backends (Claude, Grok, Pi, mock) and a Grok-like
@@ -1038,6 +1038,45 @@ Use this section when resuming mid-build.
 - Next: **Phase 4** cancel / contract repair / loop-workflow shell-out / cmd-Pi  
 - Notes: spawn event still fires with `pid=None` pre-stage (same as Claude);
   Grok returns real pid on `backend.exited`.  
+
+### 2026-07-11 — Phase 4 polish
+
+- Phase: **4 done**
+- Done:
+  - **Cancel (`c`):** `board/cancel.py` `RunControl` — per-slice flag + active
+    `Popen` registry; process-group kill (`start_new_session` + `killpg`);
+    pipeline stops further stages → outcome `stuck` reason `cancelled`; ledger
+    left as-is; mutex freed when future completes. Mock: cancel flag / `sleep_ms`.
+    Claude/Grok/cmd: bind pid + `wait_or_cancel`.
+  - **`cmd` backend:** `board/backends/cmd.py` — shell template placeholders
+    `{prompt}`, `{prompt_file}`, `{cwd}`, `{slice}`, `{stage}`, `{kuru_py}`;
+    CLI `--backend cmd --backend-cmd '…'`.
+  - **Contract check:** `--check-contract` (default off / `skip_check=True`);
+    check → optional repair loop → re-check; mock `check_flag_times` / `check:flagged`.
+  - **loop-workflow:** command + skill prefer `python3 -m board run`; Workflow JS
+    kept as Claude-only optional path; skill documents engine-aligned verifying.
+  - **`board status` / `board logs`:** list recent runs + stage log path/tail.
+  - **progress.md:** best-effort one-line append after run (never fails run).
+  - Selftest: cancel, cmd construct, check-contract default/flag, status/logs.
+- **How to invoke:**
+  ```bash
+  # Cancel: interactive board — select slice, press c
+  PYTHONPATH=. python3 -m board run --backend mock --ui board -y
+
+  # cmd / Pi-style agent
+  PYTHONPATH=. python3 -m board run --backend cmd \
+    --backend-cmd 'my-agent -p {prompt_file} --dir {cwd}' -y
+
+  # optional pre-build contract check
+  PYTHONPATH=. python3 -m board run --backend mock --check-contract -y
+
+  # run history
+  PYTHONPATH=. python3 -m board status --repo .
+  PYTHONPATH=. python3 -m board logs --slice SL-0001 --stage build --tail 40
+  ```
+- Next: optional live smoke; no plugin version bump in this session.
+- Notes: full contract-repair planner for live agents still agent-dependent;
+  mock repair is mechanical. Stronger pause already via `p` + `pause_event`.
 
 ---
 

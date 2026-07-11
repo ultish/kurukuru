@@ -1,7 +1,7 @@
 """Kurukuru board runner — agent-agnostic multi-slice orchestrator + TUI.
 
-Phase 0: plan / events / ledger wrappers. Scheduler and backends land later.
-See impl/BOARD_RUNNER_PLAN.md.
+Phases 0–4: plan, mock/claude/grok/cmd backends, hierarchical board UI,
+cancel, optional contract check, status/logs. See impl/BOARD_RUNNER_PLAN.md.
 """
 
 __version__ = "0.1.0"
