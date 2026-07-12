@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **`runner.py`** (unused cleanup) — the single-threaded Claude headless driver, not
+  part of the plugin and superseded by the `board/` runner. `board run --backend claude`
+  does everything it did and more (single-slice or whole-board, sequential or
+  target-parallel, agent-agnostic), e.g. `runner.py --repo R` →
+  `python3 -m board run --repo R --backend claude --ui plain -y`.
+
 ## [2.3.0] - 2026-07-11
 
 ### Removed

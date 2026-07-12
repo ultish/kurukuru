@@ -14,7 +14,7 @@
 | `templates/` | Files copied into the target repo's `.kuru/` by `kuru init`. Filenames are **load-bearing** — `kuru.py` reads them by exact name. |
 | `board/` | Agent-agnostic multi-slice orchestrator (`python3 -m board`). Plan/run/status/logs; backends mock/claude/grok/cmd; writes `.kuru/runs/*/events.ndjson`. Progress UI: plain/json only. |
 | `tui/` | Ratatui hierarchical board (`kuru-board-tui`). Watches run events; can spawn `board run --ui plain`. Launcher: `scripts/board-tui.sh`. |
-| `runner.py` | Standalone single-threaded Claude driver. NOT part of the plugin. Prefer `python3 -m board` for multi-slice / multi-target runs. |
+| _(headless)_ | Headless / multi-slice runs go through `board/` (`python3 -m board run`). The old single-threaded `runner.py` was removed. |
 | `.claude-plugin/plugin.json` | Plugin manifest. Claude Code auto-discovers `commands/`, `agents/`, `skills/` by convention — no explicit listing needed. |
 
 ## Data flow

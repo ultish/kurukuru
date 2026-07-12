@@ -73,8 +73,8 @@ that slice reaches `done` you go to **Termination** (you never touch another sli
 1. Re-derive state from files (do not trust earlier chat): run
    `python3 "${KURU_PY:-${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py}" next` — or, in scoped mode,
    `... next --slice <id>` (both already skip dependency-blocked slices, so just act on what is
-   returned). For an unattended run outside Claude, use the top-level `runner.py` (or
-   `runner.py --slice <id>`) instead — same logic in plain Python.
+   returned). For an unattended run outside this session, use the board runner
+   (`python3 -m board run --backend claude`, or `--slices <id>` to scope it) instead.
 2. If it prints **"No actionable slices"** (board mode), or returns `next_action: "none"` with
    `reason: "done"` (scoped mode — the slice shipped) → go to **Termination**. In scoped mode a
    `"none"` with `reason: "blocked"`/`"waiting_on_deps"` → STOP and surface it (see Preconditions).

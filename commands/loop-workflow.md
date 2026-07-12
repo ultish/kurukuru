@@ -35,8 +35,7 @@ review → ship` part of the pipeline over the actionable slices (dependencies s
 **preferred** implementation is `python3 -m board` (above). The **legacy / Claude-only** path
 authors a JavaScript orchestration script for Claude Code’s `Workflow` tool: each stage is a
 fresh isolated `agent()`. That per-step clean context is the point of both drivers — it's why
-this can clear a large board without the orchestrator's context degrading, and why it supersedes
-`runner.py`.
+this can clear a large board without the orchestrator's context degrading.
 
 The judgment-heavy phases (`/kuru:charter`, `/kuru:spec`, `/kuru:slice`) are still done by a human
 first; this only loops the deterministic part. **Code review runs when this workspace has it on**

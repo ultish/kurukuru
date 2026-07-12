@@ -20,7 +20,7 @@ the plugin loads, so the engine path resolves out of the box.
 | `.kuru/config.json` `gates` | Target repo | Gate commands for this specific project. Written by `/kuru:charter`. |
 | `.kuru/config.json` `targets` | Target repo | Per-app gate targets for monorepos/polyglot — each with its own `dir` and `gates`. |
 | `GITHUB_TOKEN` / `GITLAB_TOKEN` | Environment | For fetching private hosted profile catalogs via `init --profile <url>`. |
-| `--permission-mode` | `runner.py` flag | Default `bypassPermissions` for headless runs. Tighten with `--settings` or `--allowed-tools`. |
+| `--permission-mode` | `board run` flag | Default `bypassPermissions` for headless runs. Tighten with `--settings` or `--allowed-tools`. |
 
 Engine path resolution order: `KURU_PY` env var → `${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py` → `.kuru/engine` file written at init.
 

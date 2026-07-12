@@ -74,11 +74,11 @@ everywhere and across all workspaces. Restart Claude Code after saving.
 The last-resort fallback is the path `kuru init` records in `.kuru/engine` — useful
 if neither of the above is set.
 
-**The runner (optional, for unattended runs).** [`runner.py`](runner.py) lives at
-the repo root — it is **not** part of the plugin, it's a separate driver that
-loops the plugin headlessly (see [Running headless](#running-headless-runnerpy)).
-It needs nothing installed beyond `python3` and the `claude` CLI (logged in). You
-don't need it for manual `/kuru:*` use.
+**The board runner (optional, for unattended / multi-slice runs).** The
+[`board/`](board) package drives the plugin headlessly (see [Running
+headless](#running-headless-board-runner)) — agent-agnostic, and parallel across
+gate targets. It needs nothing installed beyond `python3` and the agent CLI you
+point it at (`claude`, logged in). You don't need it for manual `/kuru:*` use.
 
 ## Quickstart (in the repo you're building)
 
@@ -114,7 +114,7 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
 - **In-session (sequential):** `/kuru:loop` runs build → verify → review → ship over the ready
   slices, one at a time, until the board is clear (review runs when the workspace has it on — the
   `kuru init` default; a review rejection rebuilds like a verify rejection). To ship just **one**
-  named slice and stop there, pass its id: `/kuru:loop <id>` (or `runner.py --slice <id>`).
+  named slice and stop there, pass its id: `/kuru:loop <id>` (or `board run --slices <id>`).
 - **Dynamic workflow (per-slice pipelines):** `/kuru:loop-workflow` runs the same build →
   verify → review → ship cycle, but it authors a Claude Code **dynamic workflow** — a JavaScript script
   you approve, which the workflow runtime runs in the background. It asks the engine
@@ -128,14 +128,16 @@ frozen contracts, the rest is mechanical. There are three ways to drive it:
   once its `depends_on` are all `done`, so a dependent begins the instant its last dep ships. A
   single-target repo thus runs fully sequentially by design; a polyglot/monorepo runs one
   pipeline per app at once. That per-step clean context is the point: it clears a large board
-  without saturating the session, which is why it **supersedes the headless `runner.py`**. The
+  without saturating the session. (For a portable, non-Claude-Code driver with the same per-slice
+  pipelines, see the [board runner](#running-headless-board-runner) below.) The
   workflow's agents touch kuru only through `/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`
   (never `kuru.py`); the engine serializes ledger writes with a file lock. Ship defers its commit,
   so the launching session makes **one commit after the run** (trading per-slice revert
   granularity for parallel speed). `/kuru:loop-workflow SL-0001,SL-0002` scopes it to a curated
   set — they run in parallel if on different targets, else serialized. (Requires Claude Code
   workflows enabled.)
-- **Headless / unattended:** [`runner.py`](runner.py) — sequential — see below.
+- **Headless / unattended:** the [board runner](#running-headless-board-runner) (`python3 -m board
+  run`) — agent-agnostic (Claude/Grok/cmd), sequential or target-parallel — see below.
 
 Across all three, `max-tries` is **per run**: re-running a `loop*` command resets every
 slice's try tally, so the cap governs only the current run. A **try** is one full
@@ -256,74 +258,91 @@ charter's conversion to a multi-app config automatically.
 }
 ```
 
-## Running headless (`runner.py`)
+## Running headless (board runner)
 
-`runner.py` is a standalone Python loop (stdlib only) that drives the plugin with
-no human in the chair. It reads engine state (`kuru next --json`) to **decide**
-the next step, then launches a **fresh `claude -p` session** to **do** it
-(`/kuru:build`, `/kuru:verify`, and `/kuru:review` when the workspace has review on) —
-and ships a shippable slice (`verified` with review off, or `reviewed`) to `done`
-itself. It repeats until the board is clear.
-Each step is its own process, so context never accumulates and the builder and
-verifier are separate processes, not just separate agents. It never writes
-progress status itself (the one exception being the verified→done ship), so the
-engine's gate/role/dependency rules still gate every transition.
+The `board/` package (`python3 -m board`) is a standalone Python orchestrator
+(stdlib only) that drives the plugin with no human in the chair. It reads engine
+state (`kuru next --all --json`) to **decide** what's ready, then launches a
+**fresh agent process per stage** to **do** it (`build`, `verify`, `review` when
+the workspace has review on, then `ship`), repeating until the board is clear.
+Each stage is its own process, so context never accumulates and the builder and
+verifier are separate processes, not just separate agents; it reads the ledger
+back after every stage, so the engine's gate/role/dependency rules gate every
+transition. It runs **one per-slice `build → verify → review → ship` pipeline per
+slice**, keyed on the **gate target** — same target serialized (one shared tree),
+different targets in parallel, dependency-ordered — the same policy as
+`/kuru:loop-workflow`, but as a portable process tree instead of a Claude Code
+workflow. Ships defer their commit; the runner makes **one `kuru commit` after the
+run**.
+
+It's **agent-agnostic**: `--backend claude` (fresh `claude -p` per stage),
+`--backend grok` (skill-on-disk prompts + `kuru.py`), `--backend cmd` (any CLI via
+a template), or `--backend mock` (deterministic, for tests). For an interactive
+view, `scripts/board-tui.sh` launches the Ratatui board (see
+[`tui/README.md`](tui/README.md)); it tails the same run and can start/stop one.
 
 ### Setup
 
-1. **Prerequisites:** `python3` and the `claude` CLI, logged in. Confirm with
-   `claude --version`. (The runner auto-detects `claude` on `PATH` or common
-   install locations; otherwise pass `--claude-bin /path/to/claude`.)
-2. **Prove the bridge works** (once): `./scripts/test/smoke-headless.sh` — it loads the
-   plugin into a headless `claude -p` session and confirms a `/kuru:*` command
+1. **Prerequisites:** `python3` and the agent CLI for your backend — e.g. the
+   `claude` CLI, logged in (confirm with `claude --version`). The board autodetects
+   `claude`/`grok` on `PATH` or common install locations; otherwise pass
+   `--claude-bin` / `--grok-bin`.
+2. **Prove the bridge works** (once): `./scripts/test/smoke-headless.sh` — it loads
+   the plugin into a headless `claude -p` session and confirms a `/kuru:*` command
    resolves.
 3. **Get a target repo to the loopable point** with the manual commands:
    `/kuru:charter` → `/kuru:spec` → `/kuru:slice` (these need a human). Now every
    slice has a frozen contract.
-4. **Run the loop:**
+4. **Run it** (`scripts/board.sh` wraps `python3 -m board` with the plugin path
+   injected; or invoke the module directly):
 
    ```bash
-   # from anywhere; --repo points at the target repo's root (the one with .kuru/)
-   python3 /path/to/kuru/runner.py --repo /path/to/target-repo
+   # plan only — the multi-slice plan (targets, deps, serial vs parallel), no agents:
+   python3 -m board plan --repo /path/to/target-repo
 
-   # preview the next action without launching claude:
-   python3 /path/to/kuru/runner.py --repo /path/to/target-repo --dry-run
+   # drive the whole board with Claude, streaming logs:
+   python3 -m board run --repo /path/to/target-repo --backend claude --ui plain -y
 
-   # drive a single slice by id all the way to done, then stop
-   # (good for a first run; refuses if it's a draft or its deps aren't done):
-   python3 /path/to/kuru/runner.py --repo /path/to/target-repo --slice SL-0003
+   # drive a single slice (or a curated set) by id, then stop:
+   python3 -m board run --repo /path/to/target-repo --backend claude --slices SL-0003
+
+   # inspect a past run:
+   python3 -m board status --repo /path/to/target-repo
    ```
 
-By default `--plugin-dir` is the directory holding `runner.py` (this repo). If you
-copy `runner.py` elsewhere, pass `--plugin-dir /path/to/kuru` so it can find the
-plugin and `scripts/kuru.py`.
+By default `--plugin-dir` is autodetected; if you run the module from outside this
+repo, pass `--plugin-dir /path/to/kuru` so it can find `scripts/kuru.py`.
 
 ### Permissions
 
-Autonomous headless runs can't answer permission prompts, so by default the runner
-passes `--permission-mode bypassPermissions` to each `claude -p` step. Two ways to
-tighten that:
+Autonomous runs can't answer permission prompts, so by default the board passes
+`--permission-mode bypassPermissions` to each `claude -p` stage (and
+`--always-approve` to `grok`). Two ways to tighten the Claude path:
 
 ```bash
 # allowlist the exact tools/commands up front via a settings file, no bypass:
-python3 runner.py --repo . --permission-mode acceptEdits --settings perms.json
+python3 -m board run --repo . --backend claude --permission-mode acceptEdits --settings perms.json
 # or restrict the tool set directly:
-python3 runner.py --repo . --allowed-tools "Bash Read Edit Write Glob Grep"
+python3 -m board run --repo . --backend claude --allowed-tools "Bash Read Edit Write Glob Grep"
 ```
 
-### Key flags
+### Key flags (`board run`)
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--repo` | `.` | Target repo containing `.kuru/`. |
-| `--plugin-dir` | dir of `runner.py` | Where the kuru plugin lives. |
-| `--max-retries` | `2` | Per-slice, per-run cap on build→verify(→review) tries (a verify or review rejection, or a blocked build, each costs a try) before it `blocked`s and stops. |
-| `--max-iters` | `100` | Global safety cap on loop iterations. |
-| `--permission-mode` | `bypassPermissions` | Passed to `claude` per step. |
-| `--settings` / `--allowed-tools` | — | Tighten permissions instead of bypassing. |
-| `--model` | — | Passed to `claude --model`. |
-| `--dry-run` | — | Preview the next action without launching claude. |
-| `--slice <id>` | — | Drive only that slice to done, then stop (refuses if it's a draft or its deps aren't done). |
+| `--repo` | cwd | Target repo containing `.kuru/`. |
+| `--plugin-dir` | autodetect | Where the kuru plugin lives (`scripts/kuru.py`). |
+| `--backend` | `mock` | Stage worker: `claude` \| `grok` \| `cmd` \| `mock`. |
+| `--slices <ids>` | — | Comma-separated scope (e.g. `SL-0001,SL-0002`); omit for the whole board. |
+| `--max-tries` | `2` | Per-slice, per-run try budget (a verify/review rejection or a blocked build each costs a try). |
+| `--check-contract` | off | Run the advisory contract check before the first clean build. |
+| `--permission-mode` | `bypassPermissions` | Passed to `claude` per stage. |
+| `--settings` / `--allowed-tools` | — | Tighten Claude permissions instead of bypassing. |
+| `--model` | — | Passed through (`claude --model` / `grok -m`). |
+| `--ui` | `plain` | `plain` (streaming logs) or `json` (summary). Interactive board: `scripts/board-tui.sh`. |
+| `--yes` / `-y` | — | Skip the approval prompt (for CI / unattended). |
+| `--dry-run` | — | Plan only, don't run. |
+| `--no-commit` | — | Skip the deferred `kuru commit` after ships. |
 
 ## The slice state machine
 
@@ -392,7 +411,6 @@ kuru/                       ← the plugin (auto-discovered by Claude Code)
 ├── tui/             Ratatui board UI (kuru-board-tui); see tui/README.md
 └── templates/       artifact templates copied into target repos by kuru init
 
-runner.py                   ← standalone single-threaded Claude driver (NOT part of the plugin)
 impl/                        ← internal/legacy docs (BUILD_PLAN, TASKS) — not shipped
 ```
 
@@ -438,7 +456,7 @@ version: 0.7.0
 depends_on:
   - Claude Code (plugin host — auto-discovers commands/, agents/, skills/)
   - python3 stdlib (kuru.py engine; no third-party deps, ever)
-  - claude CLI + login (runner.py headless mode only)
+  - claude CLI + login (board runner headless mode; or the grok/cmd backends)
 
 exposes:
   - /kuru:init        — scaffold a .kuru/ workspace in the target repo
@@ -456,7 +474,7 @@ exposes:
   - /kuru:status      — delivery dashboard
   - /kuru:reuse-stats — roll up builders' reuse-index lookups across slices (advisory)
   - /kuru:bearings    — session startup ritual (context-reset recovery)
-  - runner.py         — standalone headless driver (not part of the plugin)
+  - python3 -m board  — agent-agnostic headless multi-slice runner (board/ package)
   - scripts/kuru.py   — deterministic state + gate engine (CLI, callable directly)
 
 events:

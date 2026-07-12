@@ -4,7 +4,7 @@
 
 - **Commands thin, skills deep.** Methodology belongs in `skills/`, never duplicated
   into `commands/`. Commands orchestrate; skills teach.
-- **stdlib only, forever.** No `pip install`. `kuru.py` and `runner.py` must run on
+- **stdlib only, forever.** No `pip install`. `kuru.py` and the `board/` package must run on
   a clean `python3`. This is an air-gap requirement and a hard constraint, not a preference.
 - **Template filenames are load-bearing.** `kuru.py` reads templates by exact name
   (`config.json`, `charter.md`, `progress.md`, `workspace-readme.md`, `slice.md`,
@@ -56,5 +56,6 @@
 - **The verifier's tools list must be explicit.** Omitting `tools:` entirely would
   inherit everything including Write/Edit, breaking the "judge, don't fix" guarantee.
   The explicit allowlist (`Read, Grep, Glob, Bash, Skill, mcp__playwright`) stays.
-- **`runner.py` is NOT part of the plugin.** It's a standalone driver at the repo
-  root. Don't reference it from plugin commands or treat it as a plugin component.
+- **Headless / multi-slice runs go through `board/` (`python3 -m board`), not slash commands.**
+  Agent-agnostic (`--backend claude|grok|cmd|mock`), target-parallel. The old single-threaded
+  `runner.py` was removed (superseded by the board runner); don't reference it.

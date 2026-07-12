@@ -32,14 +32,15 @@ addendum) win.
 - `tui/` — Ratatui board UI (`kuru-board-tui`); airgap Linux amd64 builds via
   `scripts/build-tui-rhel9.sh` → `dist/kuru-board-tui-linux-amd64.tar.gz`. Guide:
   `tui/README.md`.
-- `runner.py` — standalone headless driver. **NOT part of the plugin**; it's a thin
-  dispatcher over `kuru next --json` + the `/kuru:*` commands.
 - `.claude-plugin/` — `plugin.json` + `marketplace.json` manifests.
+
+Headless / multi-slice runs go through `board/` (`python3 -m board run --backend
+claude|grok|cmd`); the old single-threaded `runner.py` has been removed.
 
 ## Hard constraints (don't break these)
 
-- **Stdlib only.** No third-party Python dependencies, ever. `kuru.py` and
-  `runner.py` must run on a clean `python3`.
+- **Stdlib only.** No third-party Python dependencies, ever. `kuru.py` and the
+  `board/` package must run on a clean `python3`.
 - **Template filenames are load-bearing.** `kuru.py` reads templates by exact name
   (`config.json`, `charter.md`, `progress.md`, `board-handoff.md`, `workspace-readme.md`,
   `slice.md`, `contract.yml`, `build-log.md`, `verification.md`, `init.sh`,

@@ -18,8 +18,8 @@ prose; they cannot talk past the engine.
 - Separated subagents (planner / builder / verifier / contract-critic) that encode the work/judgment split
 - Methodology skills (kuru-method, writing-specs, slicing-work, checking-a-contract, building-a-slice, verifying-a-slice, reviewing-a-slice, loop-workflow)
 - Templates that scaffold a `.kuru/` workspace inside any target repo
-- Multi-slice board orchestrator (`board/`) and optional Ratatui board UI (`tui/`)
-- A standalone single-threaded Claude driver (`runner.py`) for unattended runs (prefer `python3 -m board` for multi-slice)
+- Multi-slice board orchestrator (`board/`, `python3 -m board`) for headless / unattended runs — agent-agnostic (Claude/Grok/cmd), sequential or target-parallel
+- Optional Ratatui board UI (`tui/`) that drives and tails a board run
 
 ## Not responsible for
 - The actual project being built — kurukuru is the harness, not the cargo

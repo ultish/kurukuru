@@ -82,8 +82,8 @@ targets run in parallel** (disjoint subtrees can't contaminate each other). A sl
 starts only once its `depends_on` are all `done`, so the dependency DAG is honored and a
 dependent begins the instant its last dep ships. A single-target repo runs fully sequentially by
 design; a polyglot/monorepo runs one pipeline per app at once. That per-step clean context is the
-point: it clears a large board without saturating the session, which is why it supersedes the
-headless `runner.py`. The workflow's agents touch kuru only through the `/kuru:*` commands
+point: it clears a large board without saturating the session. The workflow's agents touch kuru
+only through the `/kuru:*` commands
 (`/kuru:build`, `/kuru:verify`, `/kuru:ship --no-commit`), never `kuru.py` directly, so the
 "only `kuru.py` mutates the ledger" rule holds; the engine serializes ledger writes with a file
 lock (`.kuru/.ledger.lock`). Ship defers its commit (`--no-commit`); the launching session makes

@@ -43,9 +43,10 @@ verifier result piles into one context window; after a dozen slices the orchestr
 reasoning in a saturated context and quality decays. A dynamic workflow runs each `agent()`
 in its **own fresh context**, out of process — the script keeps only small structured results
 in JS variables, never the agents' transcripts. So a 30-slice board costs the orchestrator
-almost no context, and each build/verify/ship starts from zero every time. This is why the
-workflow **replaces `runner.py`**: it gives the per-step context isolation `runner.py` reached
-for, but natively and resumably (within the session).
+almost no context, and each build/verify/ship starts from zero every time. This per-step
+isolation is the point: a big board clears without the orchestrator's context degrading,
+natively and resumably within the session. (The portable `board/` runner reaches the same
+result out of process.)
 
 ## The shape of the command
 
