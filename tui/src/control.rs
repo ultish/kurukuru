@@ -3,8 +3,10 @@
 use crate::config::{Backend, RunConfig};
 use crate::events::latest_run_dir;
 use anyhow::{bail, Context, Result};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 /// Lifecycle of a board child spawned by the TUI.
@@ -37,6 +39,12 @@ pub struct RunManager {
     pre_start_run: Option<PathBuf>,
     /// When we started waiting for a new run after spawn.
     wait_since: Option<Instant>,
+    /// Captured stderr of the current/last child, read on a background thread
+    /// so polling `try_wait()` never blocks on the pipe filling up.
+    stderr_rx: Option<Receiver<String>>,
+    /// Set when the child exited (or timed out) before ever producing a run
+    /// dir — i.e. the spawn silently failed. Consumed once via `take_error()`.
+    last_error: Option<String>,
 }
 
 impl Default for RunManager {
@@ -46,6 +54,8 @@ impl Default for RunManager {
             status: RunStatus::Idle,
             pre_start_run: None,
             wait_since: None,
+            stderr_rx: None,
+            last_error: None,
         }
     }
 }
@@ -63,19 +73,57 @@ impl RunManager {
         match child.try_wait() {
             Ok(Some(status)) => {
                 let code = status.code();
+                let was_waiting = self.wait_since.is_some();
                 self.child = None;
                 self.status = RunStatus::Finished { code };
                 self.wait_since = None;
+                if was_waiting {
+                    self.last_error = Some(self.format_early_exit(code));
+                }
             }
             Ok(None) => {
                 // still running — keep Running status (pid already set)
             }
             Err(_) => {
+                let was_waiting = self.wait_since.is_some();
                 self.child = None;
                 self.status = RunStatus::Finished { code: None };
                 self.wait_since = None;
+                if was_waiting {
+                    self.last_error = Some(self.format_early_exit(None));
+                }
             }
         }
+    }
+
+    /// Drain the background stderr-reader thread (child has already exited,
+    /// so the pipe is closed and this returns almost immediately).
+    fn take_stderr(&mut self) -> String {
+        match self.stderr_rx.take() {
+            Some(rx) => rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default(),
+            None => String::new(),
+        }
+    }
+
+    fn format_early_exit(&mut self, code: Option<i32>) -> String {
+        let stderr = self.take_stderr();
+        let code_s = code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+        if stderr.trim().is_empty() {
+            format!(
+                "board run exited (code {code_s}) before writing any run dir — \
+                 no stderr captured; try running the same command in a terminal."
+            )
+        } else {
+            format!(
+                "board run exited (code {code_s}) before writing any run dir:\n\n{}",
+                stderr.trim()
+            )
+        }
+    }
+
+    /// Consume the last spawn/run error, if any (e.g. a precondition refusal).
+    pub fn take_error(&mut self) -> Option<String> {
+        self.last_error.take()
     }
 
     /// Spawn `python3 -m board run -y --ui plain …`.
@@ -136,7 +184,7 @@ impl RunManager {
             .env("CLAUDE_PLUGIN_ROOT", &cfg.plugin_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
 
         // Own process group so stop can signal the whole tree.
         #[cfg(unix)]
@@ -145,10 +193,23 @@ impl RunManager {
             cmd.process_group(0);
         }
 
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn {} -m board run", cfg.python))?;
         let pid = child.id();
+
+        // Read stderr to completion on a background thread — try_wait() below
+        // must never block, and a full pipe would otherwise stall the child.
+        self.stderr_rx = child.stderr.take().map(|mut pipe| {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let mut buf = String::new();
+                let _ = pipe.read_to_string(&mut buf);
+                let _ = tx.send(buf);
+            });
+            rx
+        });
+
         self.child = Some(child);
         self.status = RunStatus::Running { pid };
         Ok(())
@@ -224,6 +285,12 @@ impl RunManager {
         if let Some(since) = self.wait_since {
             if since.elapsed() > Duration::from_secs(60) {
                 self.wait_since = None;
+                self.last_error = Some(
+                    "timed out waiting 60s for a new .kuru/runs/*/events.ndjson after \
+                     starting board run — the process is still alive (check `ps` for the \
+                     pid) but hasn't written a run dir yet; press S/x to stop it."
+                        .to_string(),
+                );
                 return None;
             }
         }

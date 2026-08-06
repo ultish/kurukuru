@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-08-06
+
+### Fixed
+- **`kuru-board-tui` silently swallowed board-run start failures.** `RunManager::start()`
+  redirected the spawned `python3 -m board run` child's stderr to `/dev/null`; a
+  precondition refusal (missing `charter.md`/specs, draft slices, `kuru doctor`
+  errors) or crash before any run dir existed left the TUI frozen on "waiting for
+  events…" with zero explanation — indistinguishable from "no slices yet." stderr is
+  now captured on a background thread and surfaced in a red error modal (also fires
+  on the previously-silent 60s wait timeout, e.g. a hung backend).
+
+### Added
+- **`scripts/build-tui-macos.sh`** — native (no container) macOS release build for
+  `kuru-board-tui`, mirroring `build-tui-rhel9.sh`'s `dist/` conventions
+  (`kuru-board-tui-macos-<arch>.tar.gz` + `otool -L` dynamic-link audit). Both
+  scripts now merge into a shared `dist/SHA256SUMS` instead of clobbering it — fixed
+  the same bug in `build-tui-rhel9.sh`, whose extraction step previously overwrote
+  the file with the container's own Linux-only checksums.
+
 ## [2.3.1] - 2026-07-12
 
 ### Removed

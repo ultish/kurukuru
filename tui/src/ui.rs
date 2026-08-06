@@ -29,6 +29,7 @@ pub enum Modal {
     Help,
     BackendPicker { selected: usize },
     ConfirmStart,
+    Error(String),
 }
 
 pub struct UiState {
@@ -95,6 +96,7 @@ pub fn draw(
         Modal::Help => draw_help_modal(frame),
         Modal::BackendPicker { selected } => draw_backend_picker(frame, *selected, cfg),
         Modal::ConfirmStart => draw_confirm_start(frame, cfg, run_status),
+        Modal::Error(msg) => draw_error_modal(frame, msg),
     }
 }
 
@@ -392,6 +394,37 @@ fn draw_confirm_start(frame: &mut Frame, cfg: &RunConfig, run_status: &RunStatus
         .title(" confirm start ")
         .border_style(Style::default().fg(Color::Green));
     frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn draw_error_modal(frame: &mut Frame, msg: &str) {
+    dim_overlay(frame);
+    let area = centered_rect(75, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            " board run failed to start ",
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    lines.extend(msg.lines().map(|l| Line::from(l.to_string())));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Esc / Enter to close ",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" error ")
+        .border_style(Style::default().fg(Color::Red));
+    let p = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, area);
 }
 
 fn draw_overview_body(

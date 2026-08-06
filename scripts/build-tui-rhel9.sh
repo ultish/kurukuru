@@ -10,9 +10,11 @@
 #   dist/kuru-board-tui-linux-amd64              # bare ELF (Unix style, no extension)
 #   dist/kuru-board-tui-linux-amd64.tar.gz       # release archive (has .tar.gz)
 #   dist/kuru-board-tui                          # short name (same binary)
-#   dist/SHA256SUMS
+#   dist/SHA256SUMS                              # merged, not clobbered — see build-tui-macos.sh
 #
-# Attach the .tar.gz (and SHA256SUMS) to a GitHub Release.
+# Attach the .tar.gz (and SHA256SUMS) to a GitHub Release. Pair with
+# scripts/build-tui-macos.sh to also ship a native macOS binary — both write
+# into dist/ and share a merged SHA256SUMS, so you can run either or both.
 #
 # Usage:
 #   ./scripts/build-tui-rhel9.sh
@@ -176,6 +178,14 @@ fi
 echo "==> extracting /out → $DIST …"
 mkdir -p "$DIST"
 
+# The container build also writes its own /out/SHA256SUMS (linux entries only),
+# and the extraction below overwrites dist/SHA256SUMS with it — clobbering any
+# macOS entries build-tui-macos.sh may have written. Snapshot first, merge after.
+EXISTING_SUMS="$(mktemp)"
+if [[ -f "$DIST/SHA256SUMS" ]]; then
+  cp "$DIST/SHA256SUMS" "$EXISTING_SUMS"
+fi
+
 # Primary extract: stream tar on stdout → host tar. No volume mounts, no
 # container cp. Avoids Apple Container issues:
 #   - cp from stopped container → "not running"
@@ -279,11 +289,21 @@ EOF
 tar -C "$STAGE" -czf "$ARCHIVE" kuru-board-tui-linux-amd64
 rm -rf "$STAGE"
 
-if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$DIST" && sha256sum kuru-board-tui kuru-board-tui-linux-amd64 kuru-board-tui-linux-amd64.tar.gz > SHA256SUMS)
-elif command -v shasum >/dev/null 2>&1; then
-  (cd "$DIST" && shasum -a 256 kuru-board-tui kuru-board-tui-linux-amd64 kuru-board-tui-linux-amd64.tar.gz > SHA256SUMS)
+# Merge into dist/SHA256SUMS rather than clobbering (build-tui-macos.sh may
+# have already written macOS entries there). Filter from the pre-extraction
+# snapshot, not the live file — extraction above already overwrote the live
+# file with the container's own linux-only SHA256SUMS.
+SUMS_TMP="$(mktemp)"
+if [[ -s "$EXISTING_SUMS" ]]; then
+  grep -v -E "^[0-9a-f]+  (kuru-board-tui|kuru-board-tui-linux-amd64|kuru-board-tui-linux-amd64\.tar\.gz)$" "$EXISTING_SUMS" > "$SUMS_TMP" || true
 fi
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$DIST" && sha256sum kuru-board-tui kuru-board-tui-linux-amd64 kuru-board-tui-linux-amd64.tar.gz >> "$SUMS_TMP")
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$DIST" && shasum -a 256 kuru-board-tui kuru-board-tui-linux-amd64 kuru-board-tui-linux-amd64.tar.gz >> "$SUMS_TMP")
+fi
+mv "$SUMS_TMP" "$DIST/SHA256SUMS"
+rm -f "$EXISTING_SUMS"
 
 echo
 echo "==> artifacts"

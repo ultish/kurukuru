@@ -122,6 +122,15 @@ impl App {
         }
     }
 
+    /// Surface a spawn/precondition failure the child could only report on
+    /// stderr (which the TUI, not a terminal, would otherwise swallow).
+    fn poll_run_error(&mut self) {
+        if let Some(err) = self.runs.take_error() {
+            self.ui.status_msg = "board run failed to start — see error (Esc to dismiss)".into();
+            self.ui.modal = Modal::Error(err);
+        }
+    }
+
     fn attach_run_dir(&mut self, rd: PathBuf) {
         let ev = rd.join("events.ndjson");
         // Reset board state for the new run
@@ -174,6 +183,7 @@ impl App {
             if last.elapsed() >= tick {
                 self.runs.poll();
                 self.poll_new_run();
+                self.poll_run_error();
                 self.poll_tail()?;
                 last = Instant::now();
             }
@@ -293,6 +303,11 @@ impl App {
                 }
                 _ => {}
             },
+            Modal::Error(_) => {
+                if matches!(code, KeyCode::Esc | KeyCode::Enter) {
+                    self.ui.modal = Modal::None;
+                }
+            }
         }
     }
 

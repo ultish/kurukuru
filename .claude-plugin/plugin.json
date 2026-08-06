@@ -1,6 +1,6 @@
 {
   "name": "kuru",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "Enterprise delivery harness: charter -> spec -> vertical slices -> build -> independent verification -> review, with deterministic gates and file-based handoffs for long-running coding agents.",
   "author": { "name": "kuru" },
   "keywords": ["harness", "agents", "spec", "verification", "enterprise", "workflow"]

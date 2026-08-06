@@ -19,8 +19,8 @@ addendum) win.
 - `scripts/kuru.py` — the deterministic state + gate engine. **The single source of
   truth.** Only it may mutate `ledger.json` / `gate-results.json`. Path is
   load-bearing (`${CLAUDE_PLUGIN_ROOT}/scripts/kuru.py`); do not relocate.
-- `scripts/board.sh`, `board-tui.sh`, `build-tui-rhel9.sh` — production launchers /
-  release build (see `scripts/README.md`).
+- `scripts/board.sh`, `board-tui.sh`, `build-tui-rhel9.sh`, `build-tui-macos.sh` —
+  production launchers / release builds (see `scripts/README.md`).
 - `scripts/test/` — engine/board/smoke self-checks (`selftest.sh`,
   `board-selftest.sh`, `smoke-headless.sh`, `smoke-tui-linux-amd64.sh`).
 - `commands/` — the `/kuru:*` slash commands (thin orchestrators).
@@ -30,8 +30,10 @@ addendum) win.
 - `templates/` — files copied into a target repo's `.kuru/` workspace by `kuru init`.
 - `board/` — agent-agnostic multi-slice orchestrator (`python3 -m board`).
 - `tui/` — Ratatui board UI (`kuru-board-tui`); airgap Linux amd64 builds via
-  `scripts/build-tui-rhel9.sh` → `dist/kuru-board-tui-linux-amd64.tar.gz`. Guide:
-  `tui/README.md`.
+  `scripts/build-tui-rhel9.sh` → `dist/kuru-board-tui-linux-amd64.tar.gz`, and
+  native macOS builds via `scripts/build-tui-macos.sh` →
+  `dist/kuru-board-tui-macos-<arch>.tar.gz` (both share one merged
+  `dist/SHA256SUMS`). Guide: `tui/README.md`.
 - `.claude-plugin/` — `plugin.json` + `marketplace.json` manifests.
 
 Headless / multi-slice runs go through `board/` (`python3 -m board run --backend
@@ -83,23 +85,33 @@ implies ownership of the checklist; "someone else bumped it" is not an exception
    `.claude-plugin/marketplace.json` (top-level and `plugins[0]`).
 3. Use SemVer: bug fixes → patch, backward-compatible features → minor, breaking
    changes to the engine / state machine / template contract → major.
-4. **Board TUI Linux release asset (do not skip).** Air-gapped / RHEL 9 users
-   install the prebuilt binary; a version cut without it leaves them stranded.
-   - Build (repo root; Docker or Apple Container; network at build time):
+4. **Board TUI release assets (do not skip the Linux one).** Air-gapped / RHEL 9
+   users install the prebuilt Linux binary; a version cut without it leaves them
+   stranded. Build the macOS binary too so Mac users don't need a Rust toolchain —
+   both scripts write into `dist/` and share one merged `dist/SHA256SUMS` (run
+   either order, or both).
+   - Linux (repo root; Docker or Apple Container; network at build time):
      ```bash
      ./scripts/build-tui-rhel9.sh
      ```
      Prefer `DOCKER=docker` when the daemon is up; otherwise
      `DOCKER=container` on Apple Silicon. Details: `tui/README.md`,
      `docs/airgap-tui.md`.
+   - macOS (repo root; native, no Docker — just needs `cargo`):
+     ```bash
+     ./scripts/build-tui-macos.sh
+     ```
    - Confirm artifacts exist and look right:
      - `dist/kuru-board-tui-linux-amd64.tar.gz` — **primary GitHub Release asset**
-     - `dist/SHA256SUMS`
+     - `dist/kuru-board-tui-macos-<arch>.tar.gz` — macOS asset (arch = whatever
+       Mac you built on, e.g. `arm64`)
+     - `dist/SHA256SUMS` — has entries for **both**
      - `file dist/kuru-board-tui-linux-amd64` → ELF 64-bit **x86-64** (not arm64)
-   - Mention the tarball in the release notes (RHEL 9–class glibc, x86_64 only;
-     unpack → `chmod +x kuru-board-tui`; macOS still builds from `tui/` source).
-   - Do **not** commit `dist/` (gitignored). The asset lives on the Release only —
-     it is attached in step 5, not committed.
+   - Mention both tarballs in the release notes (Linux: RHEL 9–class glibc,
+     x86_64 only, unpack → `chmod +x kuru-board-tui`; macOS: native build for the
+     builder's arch — other Mac architectures still build from `tui/` source).
+   - Do **not** commit `dist/` (gitignored). The assets live on the Release only —
+     they are attached in step 5, not committed.
 5. **Commit, tag, and cut the GitHub Release** — there is **no CI**; releases are
    100% manual. Committing and pushing to `main` does **not** create a release; a
    Release only exists once you run `gh release create`. Every version bump gets a
@@ -117,6 +129,8 @@ implies ownership of the checklist; "someone else bumped it" is not an exception
        --title "v<X.Y.Z> — <headline>" \
        --notes "<the CHANGELOG section for this version>" \
        dist/kuru-board-tui-linux-amd64.tar.gz \
+       dist/kuru-board-tui-macos-*.tar.gz \
        dist/SHA256SUMS
      ```
-   - Verify: `gh release view v<X.Y.Z>` shows both assets and `isDraft: false`.
+   - Verify: `gh release view v<X.Y.Z>` shows all assets (Linux, macOS,
+     SHA256SUMS) and `isDraft: false`.

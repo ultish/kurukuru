@@ -250,7 +250,10 @@ Suggested release blurb:
 - Asset: kuru-board-tui-linux-amd64.tar.gz
 - Built on Rocky 9 (RHEL 9–compatible glibc)
 - Airgap: tar -xzf … && chmod +x kuru-board-tui; copy harness plugin
-- macOS: build from source in tui/
+
+### kuru-board-tui (macOS <arch>)
+- Asset: kuru-board-tui-macos-<arch>.tar.gz
+- Native build, no vendored deps (pure Rust)
 ```
 
 #### Airgap runtime (RHEL 9)
@@ -295,6 +298,31 @@ Checks: `uname -m` is `x86_64`, `ldd` resolves, `--help` works, optional `--dump
 
 More detail: [`docs/airgap-tui.md`](../docs/airgap-tui.md).
 
+### macOS prebuilt (release)
+
+Native build (no container) — runs on whatever Mac you're on, producing that
+Mac's architecture (`arm64` or `x86_64`). `kuru-board-tui` is pure Rust
+(ratatui/crossterm, no vendored C deps), so this is just
+`cargo build --release` plus packaging to match the RHEL 9 script's `dist/`
+conventions:
+
+```bash
+./scripts/build-tui-macos.sh
+```
+
+Produces:
+
+```text
+dist/kuru-board-tui-macos-<arch>.tar.gz  # attach this to GitHub Release
+dist/kuru-board-tui-macos-<arch>         # bare Mach-O binary
+dist/SHA256SUMS                          # merged with any Linux entries
+dist/otool-macos-<arch>.txt              # dynamic-link audit (otool -L)
+```
+
+`dist/SHA256SUMS` is merged, not clobbered — run `build-tui-rhel9.sh` and
+`build-tui-macos.sh` in either order (or both) and both sets of entries
+survive.
+
 ---
 
 ## Fallback without this binary
@@ -336,6 +364,7 @@ tui/
 | `../board/` | Python board orchestrator |
 | `../scripts/board.sh` | `python3 -m board` launcher |
 | `../scripts/board-tui.sh` | TUI launcher |
-| `../scripts/build-tui-rhel9.sh` | Docker → `dist/` for GitHub releases |
+| `../scripts/build-tui-rhel9.sh` | Docker → `dist/` for GitHub releases (Linux amd64) |
+| `../scripts/build-tui-macos.sh` | Native `cargo build` → `dist/` for GitHub releases (macOS) |
 | `../scripts/test/smoke-tui-linux-amd64.sh` | Rocky 9 smoke for the Linux amd64 binary |
 | Target repo `.kuru/BOARD_HANDOFF.md` | New-agent-tab briefing after board runs |
